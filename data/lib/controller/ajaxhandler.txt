@@ -1,0 +1,107 @@
+<?php
+
+namespace Linxys\LexofficeInterface\Controller;
+
+use Bitrix\Main\Engine\Controller;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\SystemException;
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\Loader;
+use Bitrix\Crm\DealTable;
+use Bitrix\Disk\Internals\Engine;
+use Bitrix\Disk\Internals\Error\Error;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Linxys\LexofficeInterface\BackgroundJob;
+
+class AjaxHandler extends Engine\Controller
+{
+	const MODULE_ID = 'linxys.lexofficeinterface';
+
+	public function runGenerationAction($type)
+	{
+		Loader::includeModule('crm');
+
+		$message = '';
+
+		if(!ModuleHelper::isBulkGenerationStop() && !ModuleHelper::isBulkGenerationRunning())
+		{
+			$stageID = 0;
+
+			if($type == 'AB')
+			{
+				$stageID = ModuleHelper::getStartBulkABGenerationStageID();
+			}
+			if($type == 'RE')
+			{
+				$stageID = ModuleHelper::getStartBulkREGenerationStageID();
+			}
+
+			if($stageID)
+			{
+				$arParams = [
+					'filter' => ['STAGE_ID' => $stageID],
+					'select' => ['ID'],
+					'order' => ['ID' => 'ASC'],
+					'count_total' => true,
+				];
+
+				$dealCount = DealTable::getList($arParams)->getCount();
+
+				if($dealCount == 0)
+				{
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_AJAXHANDLER_DEALS_NOT_FOUND", ['#TYPE#' => $type]);
+				}
+
+				if($dealCount > 0)
+				{
+					BackgroundJob::runBulkGeneration($type);
+
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_AJAXHANDLER_DEALS_GENERATE_START", ['#TYPE#' => $type, '#COUNT#' => $dealCount]);
+				}
+
+				return [
+					'RESULT' => 'OK',
+					'TOTAL_DEALS' => $dealCount,
+					'MESSAGE' => $message
+				];
+			}
+		}
+
+		return [
+			'RESULT' => 'NOT OK',
+			'TOTAL_DEALS' => 0,
+			'MESSAGE' => $message
+		];
+	}
+
+	public function startGenerationAction($type)
+	{
+		Loader::includeModule('main');
+
+		if ($type)
+		{
+			ModuleHelper::sendStartStopBulkGenerationPullCommand('hideStartButton');
+			ModuleHelper::sendStartStopBulkGenerationPullCommand('showStopButton');
+
+			return ['RESULT' => 'UPDATED'];
+		}
+
+		\CMain::FinalActions();
+	}
+
+	public function stopGenerationAction($stop)
+	{
+		Loader::includeModule('main');
+
+		if ($stop) {
+			Loader::includeModule('crm');
+
+			Option::set(self::MODULE_ID, 'BULK_GENERATION_STOP', "Y");
+			Option::set(self::MODULE_ID, 'BULK_GENERATION_RUNNING', "N");
+
+			return ['RESULT' => 'STOPED'];
+		}
+
+		\CMain::FinalActions();
+	}
+}

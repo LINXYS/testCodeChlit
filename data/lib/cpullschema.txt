@@ -1,0 +1,17 @@
+<?php
+namespace Linxys\LexofficeInterface;
+
+use Bitrix\Main\Loader;
+
+class CPullSchema
+{
+	const MODULE_ID = 'linxys.lexofficeinterface';
+
+	public static function OnGetDependentModule()
+	{
+		return [
+			'MODULE_ID' => self::MODULE_ID,
+			'USE' => ["PUBLIC_SECTION"]
+		];
+	}
+}

@@ -1,0 +1,299 @@
+<?
+namespace Linxys\LexofficeInterface;
+
+use Linxys\LexofficeInterface\Entity\BulkGenerationWorkersTable;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Bitrix\Main\HttpApplication;
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\Application;
+use Bitrix\Crm\DealTable;
+use Bitrix\Main\Loader;
+
+
+Class BackgroundJob
+{
+	const MODULE_ID = "linxys.lexofficeinterface";
+
+	public static function runBulkGeneration($type)
+	{
+		Loader::includeModule('crm');
+
+		if ($type == 'AB') {
+			if (!ModuleHelper::isBulkGenerationStop() && !ModuleHelper::isBulkGenerationRunning()) {
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0);
+
+				$stageID = ModuleHelper::getStartBulkABGenerationStageID();
+				$bulkPackageCount = ModuleHelper::getBulkGenerationWorkersNumber();
+
+				$arDealsIds = [];
+				$arParams = [
+					'filter' => ['STAGE_ID' => $stageID],
+					'select' => ['ID'],
+					'order' => ['ID' => 'ASC']
+				];
+				$rsDealsIds = DealTable::getList($arParams);
+				while ($arDeal = $rsDealsIds->fetch()) {
+					$arDealsIds[] = $arDeal['ID'];
+				}
+				$total = count($arDealsIds);
+				if ($total > 0) {
+					Option::set(self::MODULE_ID, 'BULK_GENERATION_RUNNING', "Y");
+				}
+
+				$processed = 0;
+				$arDealsPackage = [];
+				foreach ($arDealsIds as $dealID)
+				{
+					$arDealsPackage[$dealID] = $dealID;
+
+					if (
+						count($arDealsPackage) >= $bulkPackageCount
+						|| ($total - $processed) == 1
+						|| ($total < $bulkPackageCount && $total == count($arDealsPackage))
+						|| (($total - $processed) < $bulkPackageCount && ($total - $processed) == count($arDealsPackage))
+					)
+					{
+						ModuleHelper::writeToLog($arDealsPackage, 'Package AB formed');
+
+						$processed = $processed + count($arDealsPackage);
+
+						Loader::includeModule('linxys.lexofficeinterface');
+						\Bitrix\Main\Application::getInstance()->addBackgroundJob(["Linxys\LexofficeInterface\BackgroundJob", "runABJob"], [$arDealsPackage, $total]);
+
+						$arDealsPackage = [];
+					}
+				}
+			}
+		}
+		if ($type == 'RE') {
+			if (!ModuleHelper::isBulkGenerationStop() && !ModuleHelper::isBulkGenerationRunning()) {
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0);
+				$stageID = ModuleHelper::getStartBulkREGenerationStageID();
+				$bulkPackageCount = ModuleHelper::getBulkGenerationWorkersNumber();
+
+				$arDealsIds = [];
+				$arParams = [
+					'filter' => ['STAGE_ID' => $stageID],
+					'select' => ['ID'],
+					'order' => ['ID' => 'ASC']
+				];
+				$rsDealsIds = DealTable::getList($arParams);
+				while ($arDeal = $rsDealsIds->fetch()) {
+					$arDealsIds[] = $arDeal['ID'];
+				}
+				$total = count($arDealsIds);
+				if ($total > 0) {
+					Option::set(self::MODULE_ID, 'BULK_GENERATION_RUNNING', "Y");
+				}
+
+				$processed = 0;
+				$arDealsPackage = [];
+				foreach ($arDealsIds as $dealID)
+				{
+					$arDealsPackage[$dealID] = $dealID;
+
+					if (
+						count($arDealsPackage) >= $bulkPackageCount
+						|| ($total - $processed) == 1
+						|| ($total < $bulkPackageCount && $total == count($arDealsPackage))
+						|| (($total - $processed) < $bulkPackageCount && ($total - $processed) == count($arDealsPackage))
+					)
+					{
+						ModuleHelper::writeToLog($arDealsPackage, 'Package RE formed');
+
+						$processed = $processed + count($arDealsPackage);
+
+						Loader::includeModule('linxys.lexofficeinterface');
+						\Bitrix\Main\Application::getInstance()->addBackgroundJob(["Linxys\LexofficeInterface\BackgroundJob", "runREJob"], [$arDealsPackage, $total]);
+
+						$arDealsPackage = [];
+					}
+				}
+			}
+		}
+
+	}
+
+	public static function runABJob($arDealIDs, $total)
+	{
+		if (!ModuleHelper::isBulkGenerationStop())
+		{
+			$abBJStart = microtime(true);
+			ModuleHelper::writeToLog($arDealIDs, 'Background AB Job start');
+
+			//check workers
+			$workersInfo = BulkGenerationWorkersTable::getWorkersInfo($arDealIDs);
+			$arDealIdsForWorkersRequest = array_diff_key($arDealIDs, $workersInfo);
+
+			$curl = curl_init();
+			$auth = self::getAuth();
+			$url = self::getUrl();
+
+			foreach($arDealIdsForWorkersRequest as $arDealID)
+			{
+				$postData = [
+					'sessid' => bitrix_sessid(),
+					'dealID' => $arDealID,
+					'SITE_ID' => 's1',
+					'type' => 'AB'
+				];
+
+				self::sendRequestToWorker($postData, $curl, $auth, $url);
+			}
+			curl_close($curl);
+
+			// sleep for this steep execution in workers
+			if(ModuleHelper::isBulkGenerationTestMode())
+			{
+				sleep(ModuleHelper::getBulkGenerationDelayInTestMode());
+			} else {
+				sleep(20);
+
+				$workersNumber = ModuleHelper::getBulkGenerationWorkersNumber();
+				$coefficient = ModuleHelper::getBulkGenerationCoefficient();
+				$processingTime = (int)($workersNumber * $coefficient);
+
+				$isCompleted = false;
+				while ($isCompleted == false)
+				{
+					$isAllFinished = true;
+
+					$workersInfo = BulkGenerationWorkersTable::getWorkersInfo($arDealIDs);
+					foreach ($workersInfo as $status) {
+						if ($status != 'finished') {
+							$isAllFinished = false;
+							break;
+						}
+					}
+
+					$abTime = (int)(round(microtime(true) - $abBJStart));
+					if ($processingTime <= $abTime) {
+						break;
+					}
+
+					if ($isAllFinished) {
+						$isCompleted = true;
+					} else {
+						sleep(10);
+					}
+				}
+
+				$restartWorkers = array_diff_key($arDealIDs, $workersInfo);
+				if ($restartWorkers) {
+					Loader::includeModule('linxys.lexofficeinterface');
+					\Bitrix\Main\Application::getInstance()->addBackgroundJob(["Linxys\LexofficeInterface\BackgroundJob", "runABJob"], [$restartWorkers, $total]);
+				}
+			}
+
+			//update progress bar
+			$processed = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0) + (count($arDealIDs) - count($restartWorkers));
+			ModuleHelper::sendProgressBarPullCommand('AB', $total, $processed);
+			Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', $processed);
+			$count = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT');
+
+			if ($processed >= $total) {
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_RUNNING', "N");
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0);
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('hideStopButton');
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('showStartButton');
+			}
+
+			ModuleHelper::writeToLog('Background AB Job end');
+
+		} else {
+
+			$processed = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0) + count($arDealIDs);
+			Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', $processed);
+			$count = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT');
+
+			if ($processed >= $total) {
+				ModuleHelper::sendProgressBarPullCommand('AB', 0, 0);
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_STOP', "N");
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0);
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('hideStopButton');
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('showStartButton');
+			}
+		}
+	}
+
+	public static function runREJob($arDealIDs, $total)
+	{
+		if (!ModuleHelper::isBulkGenerationStop())
+		{
+			ModuleHelper::writeToLog($arDealIDs, 'Background RE Job start');
+
+			//update progress bar
+			$processed = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0) + count($arDealIDs);
+			ModuleHelper::sendProgressBarPullCommand('RE', $total, $processed);
+			Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', $processed);
+
+			$count = Option::get(self::MODULE_ID, 'BULK_GENERATION_COUNT');
+
+			$curl = curl_init();
+			$auth = self::getAuth();
+			$url = self::getUrl();
+
+			foreach($arDealIDs as $arDealID)
+			{
+				$postData = [
+					'sessid' => bitrix_sessid(),
+					'dealID' => $arDealID,
+					'SITE_ID' => 's1',
+					'type' => 'RE'
+				];
+
+				self::sendRequestToWorker($postData, $curl, $auth, $url);
+			}
+			curl_close($curl);
+
+			// sleep for this steep execution in workers
+			if(ModuleHelper::isBulkGenerationTestMode())
+			{
+				sleep(ModuleHelper::getBulkGenerationDelayInTestMode());
+			} else {
+				sleep(5);
+			}
+
+			ModuleHelper::writeToLog('Background RE Job end');
+
+			if ($processed >= $total) {
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_RUNNING', "N");
+				Option::set(self::MODULE_ID, 'BULK_GENERATION_COUNT', 0);
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('hideStopButton');
+				ModuleHelper::sendStartStopBulkGenerationPullCommand('showStartButton');
+			}
+		}
+	}
+
+	private static function sendRequestToWorker($postData, &$curl, $auth, $url)
+	{
+		curl_setopt_array($curl, array(
+			CURLOPT_SSL_VERIFYPEER => 0,
+			CURLOPT_POST => 1,
+			CURLOPT_HEADER => 1,
+			CURLOPT_USERPWD => $auth,
+			CURLOPT_FRESH_CONNECT => true,
+			CURLOPT_TIMEOUT_MS => 150,
+			CURLOPT_RETURNTRANSFER => false,
+			CURLOPT_URL => $url,
+			CURLOPT_POSTFIELDS => http_build_query($postData),
+		));
+		$result = curl_exec($curl);
+
+		return $result;
+	}
+
+	private static function getAuth()
+	{
+		return ModuleHelper::getBulkUserLogin() . ":" . ModuleHelper::getBulkUserPassword();
+	}
+
+	private static function getUrl()
+	{
+		$obContext = \Bitrix\Main\HttpApplication::getInstance()->getContext();
+		$obServer = $obContext->getServer();
+		$portalUrl = $obServer->get('HTTP_ORIGIN');
+		$url = $portalUrl . "/local/tools/" . self::MODULE_ID . "/backgroundworker.php";
+		return $url;
+	}
+}

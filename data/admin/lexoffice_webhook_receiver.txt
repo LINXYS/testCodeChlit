@@ -1,0 +1,35 @@
+<?php
+use Bitrix\Main\Loader;
+use Bitrix\Main\Application;
+use Linxys\LexofficeInterface\WebhookHandler;
+
+define('BX_SESSION_ID_CHANGE', false);
+define('BX_SKIP_POST_UNQUOTE', true);
+define('NO_AGENT_CHECK', true);
+define("STATISTIC_SKIP_ACTIVITY_CHECK", true);
+
+require($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php");
+
+$request = Application::getInstance()->getContext()->getRequest();
+
+$inputJSON = $request->getInput();
+$inputParams = json_decode($inputJSON, true);
+
+if($inputParams['organizationId'] && $inputParams['eventType'] && $inputParams['resourceId'])
+{
+	$module_id = 'linxys.lexofficeinterface';
+	Loader::includeModule($module_id);
+	$inputParams['resourceId'] = trim($inputParams['resourceId']);
+	$arFields = [
+		"organizationId" => trim($inputParams['organizationId']),
+		"eventType" => trim($inputParams['eventType']),
+		"resourceId" => trim($inputParams['resourceId']),
+		"eventDate" => $inputParams['eventDate'],
+		"rawJson" => $inputJSON
+	];
+
+	WebhookHandler::updateDealStatus($arFields, $request);
+}
+
+
+

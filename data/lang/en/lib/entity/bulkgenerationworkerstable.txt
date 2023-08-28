@@ -1,0 +1,5 @@
+<?
+$MESS["ENTITY_ID"] = "ID";
+$MESS["DEAL_ID"] = "Deal ID";
+$MESS["STATUS"] = "Status";
+?>

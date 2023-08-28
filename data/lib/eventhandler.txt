@@ -1,0 +1,999 @@
+<?
+namespace Linxys\LexofficeInterface;
+
+use Bitrix\Main\Loader;
+use Bitrix\Crm\DealTable;
+use Bitrix\Crm\ContactTable;
+use Bitrix\Crm\CompanyTable;
+use Bitrix\Crm\InvoiceTable;
+use Bitrix\Main\UI\Extension;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Crm\UserField\UserFieldManager;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Linxys\LexofficeInterface\LexofficeHttpClient;
+use Bitrix\Main\Application;
+
+class EventHandler
+{
+	public function OnAfterDealAddUpdate($arFields)
+	{
+		if(ModuleHelper::getTriggeredPaymentStageId() == $arFields['STAGE_ID'])
+		{
+			$arDeal = self::collectInformation($arFields['ID']);
+
+			$paketFieldCode = ModuleHelper::getPaketFieldCode();
+			$paketFieldValueNoNeedABREFor = ModuleHelper::getPaketValueNoNeedABREForCode();
+
+			if ($arDeal['DEAL'][$paketFieldCode] != $paketFieldValueNoNeedABREFor)
+			{
+				$obContext = \Bitrix\Main\HttpApplication::getInstance()->getContext();
+				$obServer = $obContext->getServer();
+				$portalUrl = $obServer->get('HTTP_ORIGIN');
+
+				if($arDeal['COMPANY'])
+				{
+					// 1. check for existing customer
+					$lexOfficeContactField = ModuleHelper::getLexOfficeContactFieldCode();
+
+					if(!$arDeal['COMPANY'][$lexOfficeContactField])
+					{
+						$lexofficeContactID = self::addLexofficeContact($arDeal, $portalUrl);
+
+						if ($lexofficeContactID)
+						{
+							// add invoice
+							self::createUpdateInvoiceInLexoffice($arDeal['DEAL'], $lexofficeContactID, $portalUrl);
+						}
+
+					} else {
+						// 3.0 Create invoice
+						// contact created in lexoffice
+						self::createUpdateInvoiceInLexoffice($arDeal['DEAL'], $arDeal['COMPANY'][$lexOfficeContactField], $portalUrl);
+					}
+				} else {
+					// not setup company for Deal
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_MISSING_COMPANY", [
+						'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['DEAL']['ID'] . "/"
+					]);
+					ModuleHelper::sendImNotify($arDeal['DEAL']['ASSIGNED_BY_ID'], $message);
+					self::writeToErrorLog($message);
+				}
+			} else {
+				Loader::includeModule('crm');
+
+				$stageID = ModuleHelper::getNoNeedInvoiceStageId();
+
+				$obDeal = new \CCrmDeal(false);
+				$arFields = ['STAGE_ID' => $stageID];
+				$obDeal->update($arDeal['DEAL']['ID'], $arFields);
+			}
+		}
+
+		if (ModuleHelper::getTriggeredOrderConfirmationStageId() == $arFields['STAGE_ID'])
+		{
+			$arDeal = self::collectInformation($arFields['ID']);
+
+			$paketFieldCode = ModuleHelper::getPaketFieldCode();
+			$paketFieldValueNoNeedABREFor = ModuleHelper::getPaketValueNoNeedABREForCode();
+
+			if ($arDeal['DEAL'][$paketFieldCode] != $paketFieldValueNoNeedABREFor)
+			{
+				$obContext = \Bitrix\Main\HttpApplication::getInstance()->getContext();
+				$obServer = $obContext->getServer();
+				$portalUrl = $obServer->get('HTTP_ORIGIN');
+
+				if($arDeal['COMPANY'])
+				{
+					// 1. check for existing customer
+					$lexOfficeContactField = ModuleHelper::getLexOfficeContactFieldCode();
+
+					if(!$arDeal['COMPANY'][$lexOfficeContactField])
+					{
+						$lexofficeContactID = self::addLexofficeContact($arDeal, $portalUrl);
+
+						if ($lexofficeContactID)
+						{
+							// add order confirmation
+							self::createUpdateOrderConfirmationInLexoffice($arDeal['DEAL'], $lexofficeContactID, $portalUrl);
+						}
+
+					} else {
+						// 3.0 Create order information
+						// contact created in lexoffice
+						self::createUpdateOrderConfirmationInLexoffice($arDeal['DEAL'], $arDeal['COMPANY'][$lexOfficeContactField], $portalUrl);
+					}
+				} else {
+					// not setup company for Deal
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_MISSING_COMPANY", [
+						'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['DEAL']['ID'] . "/"
+					]);
+					ModuleHelper::sendImNotify($arDeal['DEAL']['ASSIGNED_BY_ID'], $message);
+					self::writeToErrorLog($message);
+				}
+			} else {
+				Loader::includeModule('crm');
+
+				$stageID = ModuleHelper::getNoNeedOrderConfirmationStageId();
+
+				$obDeal = new \CCrmDeal(false);
+				$arFields = ['STAGE_ID' => $stageID];
+				$obDeal->update($arDeal['DEAL']['ID'], $arFields);
+			}
+		}
+
+		// Bulk AB
+		if(ModuleHelper::getBulkABGenerationStageID() == $arFields['STAGE_ID'])
+		{
+			$localStorage = \Bitrix\Main\Application::getInstance()->getLocalSession('bulkGenerationAB');
+			$arDealIDs = $localStorage->get('abDealIDs');
+			$arDealIDs[$arFields['ID']] = $arFields['ID'];
+			$localStorage->set('abDealIDs', $arDealIDs);
+
+			$bulkPackageCount = ModuleHelper::getBulkGenerationWorkersNumber();
+
+			if(count($arDealIDs) >= $bulkPackageCount)
+			{
+				ModuleHelper::writeToLog($arDealIDs, 'Package AB formed');
+
+				$localStorage->set('abDealIDs', []);
+
+				Loader::includeModule('linxys.lexofficeinterface');
+				\Bitrix\Main\Application::getInstance()->addBackgroundJob(["Linxys\LexofficeInterface\BackgroundJob", "runABJob"], [$arDealIDs]);
+			}
+		}
+
+		// Bulk RE
+		if(ModuleHelper::getBulkREGenerationStageID() == $arFields['STAGE_ID'])
+		{
+			$localStorage = \Bitrix\Main\Application::getInstance()->getLocalSession('bulkGenerationRE');
+			$arDealIDs = $localStorage->get('reDealIDs');
+			$arDealIDs[$arFields['ID']] = $arFields['ID'];
+			$localStorage->set('reDealIDs', $arDealIDs);
+
+			$bulkPackageCount = ModuleHelper::getBulkGenerationWorkersNumber();
+
+			if(count($arDealIDs) >= $bulkPackageCount)
+			{
+				ModuleHelper::writeToLog($arDealIDs, 'Package RE formed');
+
+				$localStorage->set('reDealIDs', []);
+
+				Loader::includeModule('linxys.lexofficeinterface');
+				\Bitrix\Main\Application::getInstance()->addBackgroundJob(["Linxys\LexofficeInterface\BackgroundJob", "runREJob"], [$arDealIDs]);
+			}
+		}
+	}
+
+	public static function createUpdateInvoiceInLexoffice($arDeal, $lexOfficeContactField, $portalUrl)
+	{
+		$lexOfficeInvoiceField = ModuleHelper::getLexOfficeInvoiceFieldCode();
+
+		if($arDeal)
+		{
+			// check if Invoice added in Lexoffice
+			if($arDeal[$lexOfficeInvoiceField])
+			{
+				// Invoice exist in Lexoffice - not need update it !!!
+				$message = Loc::getMessage("LINXYS.LEXOFFICE_DEAL_ALREADY_HAVE_INVOICE", [
+					'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+				]);
+				self::writeToLog($message);
+			} else {
+				// Invoice not exist in Lexoffice - create it
+				$invoiceAddClient = new LexofficeHttpClient();
+				$arResultAddInvoice = $invoiceAddClient->addInvoice($arDeal, $lexOfficeContactField);
+
+				if($arResultAddInvoice['apiResult']['id'])
+				{
+					$invoiceGetClient = new LexofficeHttpClient();
+					$arLexofficeInvoice = $invoiceGetClient->getInvoice($arResultAddInvoice['apiResult']['id']);
+					// invoice created - update deal field
+
+					// generate pdf file and get its ID
+					$invoiceFileIdClient = new LexofficeHttpClient();
+					$getInvoiceFileResult = $invoiceFileIdClient->renderInvoiceDocument($arResultAddInvoice['apiResult']['id']);
+					$invoiceFileId = $getInvoiceFileResult['apiResult']['documentFileId'];
+
+					if ($invoiceFileId)
+					{
+						// download document
+						$arInvoiceResult = $invoiceGetClient->downloadLexofficeDocument($invoiceFileId);
+
+						if ($arInvoiceResult["apiResult"])
+						{
+							// save file in deal card
+							$lexofficeField = ModuleHelper::getInvoiceFileFieldCode();
+							$invoiceAttachFile = self::saveLexofficeDocument($arInvoiceResult["apiResult"], $lexofficeField, $arLexofficeInvoice['apiResult']['voucherNumber'], ModuleHelper::getInvoiceFileFieldCode());
+						} else {
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_DOWNLOAD_INVOICE_FILE", [
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+							]);
+							ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+							self::writeToErrorLog($message);
+						}
+					} else {
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_RENDER_INVOICE_FILE", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+						]);
+						ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+						self::writeToErrorLog($message);
+					}
+
+					$invoiceNumberField = ModuleHelper::getLexOfficeInvoiceNumberFieldCode();
+					$dealLexofficeInvoiceStatusField = ModuleHelper::getLexOfficeInvoiceStatusFieldCode();
+					$invoiceStatus = '';
+					switch ($arLexofficeInvoice["apiResult"]['voucherStatus'])
+					{
+						case 'draft':
+							$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_DRAFT");
+							break;
+						case 'open':
+							$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_OPEN");
+							break;
+						case 'paid':
+							$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_PAID");
+							break;
+						case 'voided':
+							$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_VOIDED");
+							break;
+					}
+					$rsEnum = \CUserFieldEnum::GetList([], [
+						"USER_FIELD_NAME" => $dealLexofficeInvoiceStatusField,
+						"VALUE" => $invoiceStatus
+					]);
+					$arEnum = $rsEnum->GetNext();
+					$dueDate = date('d.m.Y', strtotime($arLexofficeInvoice['apiResult']['dueDate']));
+
+					$arUpdateDealResult = DealTable::update($arDeal['ID'], [
+						$invoiceNumberField => $arLexofficeInvoice['apiResult']['voucherNumber'],
+						$lexOfficeInvoiceField => $arResultAddInvoice['apiResult']['id'],
+						ModuleHelper::getInvoiceLinkFieldCode() => 'https://app.lexoffice.de/permalink/invoices/view/' . $arResultAddInvoice['apiResult']['id'],
+						$dealLexofficeInvoiceStatusField => $arEnum['ID'], ModuleHelper::getDueDateFieldCode() => $dueDate,
+						ModuleHelper::getInvoiceFileFieldCode() => $invoiceAttachFile
+					]);
+
+					if(!$arUpdateDealResult->isSuccess())
+					{
+						// send error to modifier
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_UPDATE_DEAL", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+						]);
+						ModuleHelper::sendImNotify($arInvoice['RESPONSIBLE_ID'], $message);
+						self::writeToErrorLog($message);
+					} else {
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_SUCCESS_CREATED_INVOICE", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+							'#INVOICE_URL#' => 'https://app.lexoffice.de/permalink/invoices/view/' . $arResultAddInvoice['apiResult']['id'],
+						]);
+						self::writeToLog($message);
+					}
+				} else {
+					if ($arResultAddInvoice['apiResult']['message'])
+					{
+						$pattern = '/The referenced entity with the id \'{1}[0-9a-z-]+\'{1} does not exist./';
+						$pregMatch = preg_match($pattern, $arResultAddInvoice['apiResult']['message'], $match);
+						if ($pregMatch)
+						{
+							$dealInfo = self::collectInformation($arDeal['ID']);
+							//add lexoffice contact
+							$lexofficeContactID = self::addLexofficeContact($dealInfo, $portalUrl);
+
+							if ($lexofficeContactID)
+							{
+								// add invoice
+								self::createUpdateInvoiceInLexoffice($arDeal, $lexofficeContactID, $portalUrl);
+							}
+
+						} else {
+							$stDetails = '';
+							if($arResultAddInvoice['apiResult']['details'])
+							{
+								$stDetails = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_DETAIL");
+								foreach($arResultAddInvoice['apiResult']['details'] as $detail)
+								{
+									$stDetails .= $detail['field'] . " (" . $detail['message'] . ")[BR]";
+								}
+							}
+
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_INVALID_DATA_1", [
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+								'#STATUS_CODE#' => $arResultAddInvoice['statusCode'],
+								'#STATUS_TEXT#' => $arResultAddInvoice['statusText'],
+								'#MESSAGE#' => $arResultAddInvoice['apiResult']['message'],
+								'#DETAIL#' => $stDetails
+							]);
+
+							ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+							self::writeToErrorLog($arResultAddInvoice, $message);
+						}
+					}
+				}
+			}
+		} else {
+			$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_MISSING_B24_INVOICE", [
+				'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+			]);
+			ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+			self::writeToErrorLog($message);
+		}
+
+	}
+
+	public static function createUpdateOrderConfirmationInLexoffice($arDeal, $lexOfficeContactField, $portalUrl)
+	{
+		$lexOfficeOrderConfirmationField = ModuleHelper::getLexOfficeOrderConfirmationFieldCode();
+
+		if($arDeal)
+		{
+			// check if Order confirmation added in Lexoffice
+			if($arDeal[$lexOfficeOrderConfirmationField])
+			{
+				// Order confirmation exist in Lexoffice - not need update it !!!
+				$message = Loc::getMessage("LINXYS.LEXOFFICE_DEAL_ALREADY_HAVE_ORDER_CONFIRMATION", [
+					'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+				]);
+				self::writeToLog($message);
+			} else {
+				// Order confirmation not exist in Lexoffice - create it
+				$orderConfirmationAddClient = new LexofficeHttpClient();
+				$arResultAddOrderConfirmation = $orderConfirmationAddClient->addOrderConfirmation($arDeal, $lexOfficeContactField);
+
+				if($arResultAddOrderConfirmation['apiResult']['id'])
+				{
+					$orderConfirmationGetClient = new LexofficeHttpClient();
+					$arLexofficeOrderConfirmation = $orderConfirmationGetClient->getOrderConfirmation($arResultAddOrderConfirmation['apiResult']['id']);
+					// order confirmation created - update deal field
+
+					// generate pdf file and get its ID
+					$orderConfirmationFileIdClient = new LexofficeHttpClient();
+					$getOrderConfirmationFileResult = $orderConfirmationFileIdClient->renderOrderConfirmationDocument($arResultAddOrderConfirmation['apiResult']['id']);
+					$orderConfirmationFileId = $getOrderConfirmationFileResult['apiResult']['documentFileId'];
+
+					if ($orderConfirmationFileId)
+					{
+						// download document
+						$arOrderConfirmationResult = $orderConfirmationGetClient->downloadLexofficeDocument($orderConfirmationFileId);
+						if ($arOrderConfirmationResult["apiResult"])
+						{
+							// save file in deal card
+							$lexofficeField = ModuleHelper::getOrderConfirmationFileFieldCode();
+							$orderConfirmationAttachFile = self::saveLexofficeDocument($arOrderConfirmationResult["apiResult"], $lexofficeField, $arLexofficeOrderConfirmation['apiResult']['voucherNumber'], ModuleHelper::getOrderConfirmationFileFieldCode());
+						} else {
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_DOWNLOAD_ORDER_CONFIRMATION_FILE", [
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+							]);
+							ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+							self::writeToErrorLog($message);
+						}
+					} else {
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_RENDER_ORDER_CONFIRMATION_FILE", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+						]);
+						ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+						self::writeToErrorLog($message);
+					}
+
+					$orderConfirmationNumberField = ModuleHelper::getLexOfficeOrderConfirmationNumberFieldCode();
+
+					$arUpdateDealResult = DealTable::update($arDeal['ID'], [
+						$orderConfirmationNumberField => $arLexofficeOrderConfirmation['apiResult']['voucherNumber'],
+						$lexOfficeOrderConfirmationField => $arResultAddOrderConfirmation['apiResult']['id'],
+						ModuleHelper::getOrderConfirmationLinkFieldCode() => 'https://app.lexoffice.de/permalink/order-confirmations/view/' . $arResultAddOrderConfirmation['apiResult']['id'],
+						ModuleHelper::getOrderConfirmationFileFieldCode() => $orderConfirmationAttachFile
+					]);
+
+					if(!$arUpdateDealResult->isSuccess())
+					{
+						// send error to modifier
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_UPDATE_DEAL", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+						]);
+						ModuleHelper::sendImNotify($arOrderConfirmation['RESPONSIBLE_ID'], $message);
+						self::writeToErrorLog($message);
+					} else {
+						$message = Loc::getMessage("LINXYS.LEXOFFICE_SUCCESS_CREATED_ORDER_CONFIRMATION", [
+							'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+							'#ORDER_CONFIRMATION_URL#' => 'https://app.lexoffice.de/permalink/order-confirmations/view/' . $arResultAddOrderConfirmation['apiResult']['id'],
+						]);
+						self::writeToLog($message);
+					}
+				} else {
+					if($arResultAddOrderConfirmation['apiResult']['message'])
+					{
+						$pattern = '/The referenced entity with the id \'{1}[0-9a-z-]+\'{1} does not exist./';
+						$pregMatch = preg_match($pattern, $arResultAddOrderConfirmation['apiResult']['message'], $match);
+						if ($pregMatch)
+						{
+							$dealInfo = self::collectInformation($arDeal['ID']);
+							//add lexoffice contact
+							$lexofficeContactID = self::addLexofficeContact($dealInfo, $portalUrl);
+
+							if ($lexofficeContactID)
+							{
+								// add order confirmation
+								self::createUpdateOrderConfirmationInLexoffice($arDeal, $lexofficeContactID, $portalUrl);
+							}
+						} else {
+							$stDetails = '';
+							if($arResultAddOrderConfirmation['apiResult']['details'])
+							{
+								$stDetails = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_DETAIL");
+								foreach($arResultAddOrderConfirmation['apiResult']['details'] as $detail)
+								{
+									$stDetails .= $detail['field'] . " (" . $detail['message'] . ")[BR]";
+								}
+							}
+
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_INVALID_DATA_1", [
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+								'#STATUS_CODE#' => $arResultAddOrderConfirmation['statusCode'],
+								'#STATUS_TEXT#' => $arResultAddOrderConfirmation['statusText'],
+								'#MESSAGE#' => $arResultAddOrderConfirmation['apiResult']['message'],
+								'#DETAIL#' => $stDetails
+							]);
+
+							ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+							self::writeToErrorLog($arResultAddOrderConfirmation, $message);
+						}
+					}
+				}
+			}
+		} else {
+			$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_MISSING_B24_ORDER_CONFIRMATION", [
+				'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/"
+			]);
+			ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+			self::writeToErrorLog($message);
+		}
+	}
+
+	public function addLexofficeContact($arDeal, $portalUrl)
+	{
+		// 1.1 Add contact in lexoffice
+		$client = new LexofficeHttpClient();
+		$resultAddContact = $client->addContact($arDeal['COMPANY'], $arDeal['CONTACT']);
+
+		// 2.1 check if contact are created and generate error if need
+		if($resultAddContact['apiResult']['id'])
+		{
+			// create new client for fix connection not closed
+			$contactClient = new LexofficeHttpClient();
+			$arLexofficeContact = $contactClient->getContact($resultAddContact['apiResult']['id']);
+
+			if ($arLexofficeContact['apiResult']['id']) {
+
+				$kundenNummber = $arLexofficeContact['apiResult']['roles']['customer']['number'];
+				$companyFields = [
+					ModuleHelper::getLexOfficeContactFieldCode() => $arLexofficeContact['apiResult']['id'],
+					ModuleHelper::getKundenNumberFieldCode() => $kundenNummber
+				];
+
+				$resUpdateCompany = CompanyTable::update($arDeal['COMPANY']['ID'], $companyFields);
+
+				if(!$resUpdateCompany->isSuccess())
+				{
+					// send error to modifier
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_UPDATE_COMPANY", [
+									'#COMPANY_URL#' => $portalUrl . "/crm/company/details/" . $arDeal['COMPANY']['ID'] . "/",
+									'#LEXOFFICE_CONTACT_URL#' => "https://app.lexoffice.de/customer/#/" . $arLexofficeContact['apiResult']['id'] . "/turnover",
+									'#LEXOFFICE_CONTACT_ID#' => $arLexofficeContact['apiResult']['id'],
+									'#LEXOFFICE_CONTACT_KUNDEN_NUMMBER#' => $kundenNummber,
+					]);
+					ModuleHelper::sendImNotify($arDeal['DEAL']['ASSIGNED_BY_ID'], $message);
+					self::writeToErrorLog($message);
+					return $arLexofficeContact['apiResult']['id'];
+				} else {
+					return $arLexofficeContact['apiResult']['id'];
+				}
+			}
+		} else {
+			if($resultAddContact['apiResult']['IssueList'])
+			{
+				$pattern = 'account_number_already_exists';
+				$tryCreateAgain = false;
+				foreach ($resultAddContact['apiResult']['IssueList'] as $error) {
+					if ($error['i18nKey'] == $pattern) {
+						$tryCreateAgain = true;
+					}
+				}
+				if ($tryCreateAgain) {
+					//add lexoffice contact
+					$lexofficeContactID = self::addLexofficeContact($arDeal, $portalUrl);
+					return $lexofficeContactID;
+				} else {
+					// send error to modifier
+					$entry = self::getEntryForContactError($resultAddContact['apiResult']['IssueList']);
+
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_CREATING_COMPANY_INVALID_DATA", [
+						'#COMPANY_URL#' => $portalUrl . "/crm/company/details/" . $arDeal['COMPANY']['ID'] . "/",
+						'#STATUS_CODE#' => $resultAddContact['statusCode'],
+						'#STATUS_TEXT#' => $resultAddContact['statusText'],
+						'#ENTRY#' => $entry
+					]);
+					ModuleHelper::sendImNotify($arDeal['DEAL']['ASSIGNED_BY_ID'], $message);
+					self::writeToErrorLog($resultAddContact, $message);
+					return false;
+				}
+			} else {
+				return false;
+			}
+		}
+	}
+
+	public function saveLexofficeDocument($binaryFileData, $lexofficeField, $fileName, $documentFileFieldId)
+	{
+		$file = array(
+			"name" => $fileName . '.pdf',
+			"size" => strlen($binaryFileData),
+			"tmp_name" => '',
+			"type" => "application/pdf",
+			"old_file" => "",
+			"del" => "",
+			"MODULE_ID" => "main",
+			"description" => "",
+			"content" => $binaryFileData
+		);
+
+		$documentFileId = \CFile::SaveFile($file, 'main');
+	    $filter = [
+	        "ENTITY_ID" => "CRM_DEAL",
+	        "FIELD_NAME" => $documentFileFieldId,
+	    ];
+	    $documentField = \CUserTypeEntity::GetList(
+	        [],
+	        $filter
+	    )->fetch();
+
+		$fileInputUtility = \Bitrix\Main\UI\FileInputUtility::instance();
+		$controllId = $fileInputUtility->getUserFieldCid($documentField);
+		$cid = $fileInputUtility->registerControl(NULL, $controllId);
+		$fileInputUtility->registerFile($cid, $documentFileId);
+		return $documentFileId;
+	}
+
+	public static function collectInformation($DEAL_ID)
+	{
+		$arData = [];
+		//  get Deal data
+		$arData['DEAL'] = self::getDealData($DEAL_ID);
+
+		// get Contact data
+		if($arData['DEAL']['CONTACT_ID'])
+		{
+			$arData['CONTACT'] = self::getContactData($arData['DEAL']['CONTACT_ID']);
+		} else {
+			$arData['CONTACT'] = [];
+		}
+
+		// get Company data
+		if($arData['DEAL']['COMPANY_ID'])
+		{
+			$arData['COMPANY'] = self::getCompanyData($arData['DEAL']['COMPANY_ID']);
+		} else {
+			$arData['COMPANY'] = [];
+		}
+
+		return $arData;
+	}
+
+	private static function getDealData($ID)
+	{
+		Loader::includeModule('crm');
+
+		// get deal custom fields
+		$arDealFieldsCodes = array();
+		$arDealFields = UserFieldManager::getUserFieldEntity(\CCrmOwnerType::Deal)->GetFields();
+		foreach($arDealFields as $uf_code => $field)
+		{
+			$arDealFieldsSelect[$uf_code] = $field['EDIT_FORM_LABEL'];
+		}
+		foreach($arDealFields as $uf_code => $field)
+		{
+			$arDealFieldsCodes[] = $uf_code;
+		}
+
+		//DB query
+		$arSelect = ['*'];
+		$arSelect = array_merge($arSelect, $arDealFieldsCodes);
+
+		$arParams = [
+			'filter' => ['ID' => $ID],
+			'select' => $arSelect
+		];
+
+		$arDeal = DealTable::getRow($arParams);
+		$arProductRows = [];
+		$arProductRows = \CCrmProductRow::LoadRows('D', $ID);
+		$arDeal['PRODUCT_ROWS'] = $arProductRows;
+
+		//invoice type
+		$invoiceTypeCode = ModuleHelper::getLexOfficeInvoiceTypeFieldCode();
+
+		if ($arDeal[$invoiceTypeCode] != null) {
+			$rsInvoiceType = \CUserFieldEnum::GetList(array('SORT' => 'ASC'), array('ID' => $arDeal[$invoiceTypeCode]));
+			$arInvoiceType = $rsInvoiceType->Fetch();
+			$arDeal["INVIOCE_TYPE"] = $arInvoiceType['VALUE'];
+		} else {
+			$arDeal["INVIOCE_TYPE"] = '';
+		}
+
+		//invoice remark
+		$remarkCodes = ModuleHelper::getRemarkCodes();
+		$arRemarkCodes = explode(",", $remarkCodes);
+		$arRemarkCodes = array_diff($arRemarkCodes, array('0'));
+
+		$beforeSepaRemarkText = ModuleHelper::getBeforeSepaRemarkText();
+		$afterSepaRemarkText = ModuleHelper::getAfterSepaRemarkText();
+		$beforeInvoiceRemarkText = ModuleHelper::getBeforeInvoiceRemarkText();
+		$afterInvoiceRemarkText = ModuleHelper::getAfterInvoiceRemarkText();
+
+		$beforeSepaRemarkText = self::replacePlaceholders($arDeal, $beforeSepaRemarkText);
+		$afterSepaRemarkText = self::replacePlaceholders($arDeal, $afterSepaRemarkText);
+		$beforeInvoiceRemarkText = self::replacePlaceholders($arDeal, $beforeInvoiceRemarkText);
+		$afterInvoiceRemarkText = self::replacePlaceholders($arDeal, $afterInvoiceRemarkText);
+
+		$sepaType = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_SEPA_TYPE");
+		$rechnungType = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_RECHNUNG_TYPE");
+		$arRemarkFieldsValues = array();
+		if ($arDeal["INVIOCE_TYPE"] == $sepaType) {
+			$arRemarkFieldsValues[] .= $beforeSepaRemarkText;
+		}
+		if ($arDeal["INVIOCE_TYPE"] == $rechnungType) {
+			$arRemarkFieldsValues[] .= $beforeInvoiceRemarkText;
+		}
+		if ($arDeal["INVIOCE_TYPE"] != $sepaType && $arDeal["INVIOCE_TYPE"] != $rechnungType) {
+			$arRemarkFieldsValues[] .= "";
+		}
+		foreach($arRemarkCodes as $remarkCode)
+		{
+			if (!empty($arDeal[$remarkCode])) {
+				$arRemarkFieldsValues[] .= $arDealFieldsSelect[$remarkCode].": ".$arDeal[$remarkCode];
+			}
+		}
+		if ($arDeal["INVIOCE_TYPE"] == $sepaType) {
+			$arRemarkFieldsValues[] .= $afterSepaRemarkText;
+		}
+		if ($arDeal["INVIOCE_TYPE"] == $rechnungType) {
+			$arRemarkFieldsValues[] .= $beforeInvoiceRemarkText;
+		}
+		if ($arDeal["INVIOCE_TYPE"] != $sepaType && $arDeal["INVIOCE_TYPE"] != $rechnungType) {
+			$arRemarkFieldsValues[] .= "";
+		}
+		$arRemarkFieldsValues = array_diff($arRemarkFieldsValues, array('', NULL, false));
+		$arRemarkFieldsValues = implode(PHP_EOL, $arRemarkFieldsValues);
+		$arDeal['REMARK'] = $arRemarkFieldsValues;
+
+		//invoice payment terms
+		$paymentTermLabelSepa = ModuleHelper::getInvoicePaymentTermLabelSepaText();
+		$paymentTermLabelInvoice = ModuleHelper::getInvoicePaymentTermLabelInvoiceText();
+		$paymentTermDuration = ModuleHelper::getInvoicePaymentTermDuration();
+
+		if ($arDeal["INVIOCE_TYPE"] == $sepaType) {
+			$arDeal['PAYMENT_TERM_LABEL'] = self::replacePlaceholders($arDeal, $paymentTermLabelSepa);
+		}
+		if ($arDeal["INVIOCE_TYPE"] == $rechnungType) {
+			$arDeal['PAYMENT_TERM_LABEL'] = self::replacePlaceholders($arDeal, $paymentTermLabelInvoice);
+		}
+		$arDeal['PAYMENT_TERM_DURATION'] = (int)$paymentTermDuration;
+
+		//order confirmation remark
+		$orderConfirmRemarkCodes = ModuleHelper::getOrderConfirmationRemarkCodes();
+		$arOrderConfirmRemarkCodes = explode(",", $orderConfirmRemarkCodes);
+		$arOrderConfirmRemarkCodes = array_diff($arOrderConfirmRemarkCodes, array('0'));
+
+		$beforeOrderConfirmRemarkText = ModuleHelper::getOrderConfirmationBeforeRemarkText();
+		$afterOrderConfirmRemarkText = ModuleHelper::getOrderConfirmationAfterRemarkText();
+
+		$beforeOrderConfirmRemarkText = self::replacePlaceholders($arDeal, $beforeOrderConfirmRemarkText);
+		$afterOrderConfirmRemarkText = self::replacePlaceholders($arDeal, $afterOrderConfirmRemarkText);
+
+		$arOrderConfirmRemarkFieldsValues = array();
+		if (!empty($beforeOrderConfirmRemarkText)) {
+			$arOrderConfirmRemarkFieldsValues[] .= $beforeOrderConfirmRemarkText;
+		}
+		foreach($arOrderConfirmRemarkCodes as $orderConfirmRemarkCode)
+		{
+			if (!empty($arDeal[$orderConfirmRemarkCode])) {
+				$arOrderConfirmRemarkFieldsValues[] .= $arDealFieldsSelect[$orderConfirmRemarkCode].": ".$arDeal[$orderConfirmRemarkCode];
+			}
+		}
+		if (!empty($afterOrderConfirmRemarkText)) {
+			$arOrderConfirmRemarkFieldsValues[] .= $afterOrderConfirmRemarkText;
+		}
+		$arOrderConfirmRemarkFieldsValues = array_diff($arOrderConfirmRemarkFieldsValues, array('', NULL, false));
+		$arOrderConfirmRemarkFieldsValues = implode(PHP_EOL, $arOrderConfirmRemarkFieldsValues);
+		$arDeal['ORDER_CONFIRMATION_REMARK'] = $arOrderConfirmRemarkFieldsValues;
+
+		//order confirmation intro and delivery terms
+		$orderConfirmationIntroText = ModuleHelper::getOrderConfirmationIntroductionText();
+		$orderConfirmationDeliveryTermsText = ModuleHelper::getOrderConfirmationDeliveryTermsText();
+
+		$arDeal['ORDER_CONFIRMATION_INTRODUCTION'] = self::replacePlaceholders($arDeal, $orderConfirmationIntroText);
+		$arDeal['ORDER_CONFIRMATION_DELIVERY_TERMS'] = self::replacePlaceholders($arDeal, $orderConfirmationDeliveryTermsText);
+
+		//order confirmation payment terms
+		$orderConformationPaymentTermLabelSepa = ModuleHelper::getOrderConfirmationPaymentTermLabelSepaText();
+		$orderConformationPaymentTermLabelInvoice = ModuleHelper::getOrderConfirmationPaymentTermLabelInvoiceText();
+		$orderConformationPaymentTermDuration = ModuleHelper::getOrderConfirmationPaymentTermDuration();
+
+		if ($arDeal["INVIOCE_TYPE"] == $sepaType) {
+			$arDeal['AB_PAYMENT_TERM_LABEL'] = self::replacePlaceholders($arDeal, $orderConformationPaymentTermLabelSepa);
+		}
+		if ($arDeal["INVIOCE_TYPE"] == $rechnungType) {
+			$arDeal['AB_PAYMENT_TERM_LABEL'] = self::replacePlaceholders($arDeal, $orderConformationPaymentTermLabelInvoice);
+		}
+		$arDeal['AB_PAYMENT_TERM_DURATION'] = (int)$orderConformationPaymentTermDuration;
+
+		return $arDeal;
+	}
+
+	private static function replacePlaceholders($arDeal, $content)
+	{
+		//get enum fields
+		$arDealFields = UserFieldManager::getUserFieldEntity(\CCrmOwnerType::Deal)->GetFields();
+		$arEnumDealFields = array();
+		foreach ($arDealFields as $uf_code => $field){
+			if ($field['USER_TYPE_ID'] == 'enumeration') {
+				$arEnumDealFields[] = $uf_code;
+			}
+		}
+
+		//replace
+		$pattern = '/\{{1}[0-9A-Z_]+\}{1}/';
+		$preg_match_all = preg_match_all($pattern, $content, $matches);
+		foreach ($matches[0] as $match) {
+			$match = str_replace('{', '', $match);
+			$match = str_replace('}', '', $match);
+			if (in_array($match, $arEnumDealFields)) {
+				$rsEnumDealField = \CUserFieldEnum::GetList(array('SORT' => 'ASC'), array('ID' => $arDeal[$match]));
+				$arEnumDealField = $rsEnumDealField->Fetch();
+				$match = $arEnumDealField['VALUE'];
+				$content = preg_replace($pattern, $match, $content, 1);
+			} else {
+				$content = preg_replace($pattern, $arDeal[$match], $content, 1);
+			}
+		}
+		return $content;
+	}
+
+	private static function getContactData($ID)
+	{
+		Loader::includeModule('crm');
+
+		$arParams = [
+			'filter' => ['ID' => $ID],
+			'select' => ['ID', 'NAME', 'LAST_NAME', 'HONORIFIC', 'UF_*']
+		];
+		$arResult = ContactTable::getRow($arParams);
+
+		$dbResMultiFields = \CCrmFieldMulti::GetList(
+			[],
+			['ENTITY_ID' => 'CONTACT', 'ELEMENT_ID' => $ID]
+		);
+		while($arMultiFields = $dbResMultiFields->Fetch())
+		{
+			if($arMultiFields['TYPE_ID'] == 'PHONE')
+			{
+				$arResult['PHONE'] = $arMultiFields['VALUE'];
+			}
+			if($arMultiFields['TYPE_ID'] == 'EMAIL')
+			{
+				$arResult['EMAIL'] = $arMultiFields['VALUE'];
+			}
+		} 
+
+		$salutationFieldCode = ModuleHelper::getSalutationFieldCode();
+
+		if ($arResult[$salutationFieldCode] != null) { 
+			$rsSalutation = \CUserFieldEnum::GetList(array('SORT' => 'ASC'), array('ID' => $arResult[$salutationFieldCode]));
+			$arSalutation = $rsSalutation->Fetch();
+			$arResult["HONORIFIC"] = $arSalutation['VALUE'];
+		} else {
+			$arResult["HONORIFIC"] = '';
+		}
+
+		return $arResult;
+	}
+
+	private static function getCompanyData($ID)
+	{
+		Loader::includeModule('crm');
+
+		$arParams = [
+			'filter' => ['ID' => $ID],
+			'select' => ['ID', 'TITLE', 'UF_*']
+		];
+		$arResult = CompanyTable::getRow($arParams);
+
+		return $arResult;
+	}
+
+	private static function getEntryForContactError($arIssueList)
+	{
+		$entry = '';
+		$arErrors = [];
+		foreach($arIssueList as $error)
+		{
+			if($error['source'])
+			{
+				$arErrors[$error['i18nKey']][] = $error['source'];
+			}
+		}
+
+		foreach($arErrors as $errorType => $arFields)
+		{
+			if($errorType == 'invalid_value')
+			{
+				$entry .= Loc::getMessage("LINXYS.LEXOFFICE_ERROR_INVALID_VALUE");
+				$entry .= implode('[BR]', $arFields) . '[BR]';
+			}
+			if($errorType == 'missing_entity')
+			{
+				$entry .= Loc::getMessage("LINXYS.LEXOFFICE_ERROR_MISSING_ENTITY");
+				$entry .= implode('[BR]', $arFields) . '[BR]';
+			}
+		}
+
+		return $entry;
+	}
+
+	public function OnAfterCompanyUpdate($arFields)
+	{
+		Loader::includeModule('crm');
+
+		$obContext = \Bitrix\Main\HttpApplication::getInstance()->getContext();
+		$obServer = $obContext->getServer();
+		$portalUrl = $obServer->get('HTTP_ORIGIN');
+
+		$arCompany = self::getCompanyData($arFields['ID']);
+
+		$lexOfficeContactFieldCode = ModuleHelper::getLexOfficeContactFieldCode();
+
+		if (!empty($arCompany[$lexOfficeContactFieldCode]))
+		{
+			$contactClient = new LexofficeHttpClient();
+			$arLexofficeContact = $contactClient->getContact($arCompany[$lexOfficeContactFieldCode]);
+			if ($arLexofficeContact['apiResult']['version']) {
+				//!!need to get update version!!
+				$arCompany['VERSION'] = $arLexofficeContact['apiResult']['version'];
+
+				$rsContact = \CCrmContact::GetContactByCompanyID($arCompany['ID']);
+				$arContact = $rsContact->fetch();
+				if ($arContact) {
+					$arContact = self::getContactData($arContact['ID']);
+				} else {
+					$arContact = [];
+				}
+
+				$arResultContactUpdate = $contactClient->updateContact($arCompany, $arContact);
+
+				if (!$arResultContactUpdate['statusText']) {
+					//contact in Lexoffice is successfully updated
+				} else {
+					$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_UPDATING_LEXOFFICE_CONTACT", [
+						'#COMPANY_URL#' => $portalUrl . "/crm/company/details/" . $arCompany['ID'] . "/",
+						'#STATUS_CODE#' => $arResultContactUpdate['statusCode'],
+						'#STATUS_TEXT#' => $arResultContactUpdate['statusText']
+					]);
+
+					ModuleHelper::sendImNotify($arFields['ASSIGNED_BY_ID'], $message);
+				}
+			}
+		}
+	}
+
+	public function placeGenerationButton()
+	{
+		global $USER, $APPLICATION;
+
+		$allowebStart = false;
+		$allowebStartBulkGroup = ModuleHelper::getBGSystemGroupID();
+		$arUserGroups = $USER->GetUserGroupArray();
+		if($USER->IsAdmin() || in_array($allowebStartBulkGroup, $arUserGroups))
+		{
+			$allowebStart = true;
+		}
+
+		$isStopOrRunning = false;
+		$isRunning = ModuleHelper::isBulkGenerationRunning();
+		if(ModuleHelper::isBulkGenerationStop() || $isRunning)
+		{
+			$isStopOrRunning = true;
+		}
+
+		// is AB or RE
+		$abDealCategoryID = ModuleHelper::getABPipeline();
+		$reDealCategoryID = ModuleHelper::getREPipeline();
+
+		if(\CSite::InDir('/crm/deal/category/') || \CSite::InDir('/crm/deal/kanban/category/') || \CSite::InDir('/crm/deal/list/'))
+		{
+			\Bitrix\Main\UI\Extension::load("ui.progressbar");
+			self::includeExtension();
+		}
+
+		if(
+			(\CSite::InDir('/crm/deal/category/' . $abDealCategoryID . '/') 
+			|| \CSite::InDir('/crm/deal/kanban/category/' . $abDealCategoryID . '/')) 
+		)
+		{
+			if ($allowebStart && !$isStopOrRunning) {
+				self::placeButton('AB', 'start');
+			}
+
+			if ($allowebStart && $isRunning) {
+				self::placeButton('AB', 'stop');
+			}
+		}
+
+		if(
+			(\CSite::InDir('/crm/deal/category/' . $reDealCategoryID . '/') 
+			|| \CSite::InDir('/crm/deal/kanban/category/' . $reDealCategoryID . '/')) 
+		)
+		{
+			if ($allowebStart && !$isStopOrRunning) {
+				self::placeButton('RE', 'start');
+			}
+
+			if ($allowebStart && $isRunning) {
+				self::placeButton('RE', 'stop');
+			}
+		}
+	}
+
+	private static function placeButton($type = "AB", $display)
+	{
+		global $APPLICATION;
+
+		Extension::load('ui.buttons');
+		Extension::load('ui.buttons.icons');
+
+		ob_start();
+		?>
+		<div class="pagetitle-container" style="margin-left: 5px;">
+			<a href="#" id="start-bulk-generation" class="ui-btn ui-btn-success ui-btn-icon-task" <?php if ($display == 'stop') echo 'style="display: none;"'; ?> onclick="BX.BulkGeneration.runGenerateBJ(this, '<?= $type ?>');"><?= Loc::getMessage("LINXYS.LEXOFFICE_DEAL_START_BULK_TITLE", [
+				"#TYPE#" => $type
+			]) ?></a>
+			<a href="#" id="stop-bulk-generation" class="ui-btn ui-btn-danger ui-btn-icon-task" <?php if ($display == 'start') echo 'style="display: none;"'; ?> onclick="BX.BulkGeneration.stopGenerateBJ(this, '<?= $type ?>');"><?= Loc::getMessage("LINXYS.LEXOFFICE_DEAL_STOP_BULK_TITLE", [
+				"#TYPE#" => $type
+			]) ?></a>
+		</div>
+		<?
+		$customHtml = ob_get_clean();
+		$APPLICATION->AddViewContent('inside_pagetitle', $customHtml, 1000000);
+	}
+
+	private static function includeExtension()
+	{
+		\CJSCore::RegisterExt(
+			'bulk_generation',
+			array(
+				'js' => '/local/js/linxys.lexofficeinterface/bulk_generation.js',
+			)
+		);
+
+		\CJSCore::Init('bulk_generation');
+
+		$asset = \Bitrix\Main\Page\Asset::getInstance();
+		$asset->addString("<script>BX.ready(function(){BX.BulkGeneration.bindForPullCommand();});</script>");
+	}
+
+	public static function writeToLog($arData, $title = '')
+	{
+		$logFilePath = ModuleHelper::getLogFilePath();
+		if($logFilePath)
+		{
+			define("LOG_FILENAME", $_SERVER["DOCUMENT_ROOT"] . $logFilePath . date("Y-m-d") . '_lexoffice_success.log');
+			AddMessage2Log($arData, $title);
+		}
+	}
+
+	public static function writeToErrorLog($arData, $title = '')
+	{
+		$logFilePath = ModuleHelper::getLogFilePath();
+		if($logFilePath)
+		{
+			define("LOG_FILENAME", $_SERVER["DOCUMENT_ROOT"] . $logFilePath . date("Y-m-d") . '_lexoffice_errors.log');
+			AddMessage2Log($arData, $title);
+		}
+	}
+}

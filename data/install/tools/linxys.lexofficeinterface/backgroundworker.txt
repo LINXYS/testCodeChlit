@@ -1,0 +1,86 @@
+<?
+define('BX_SESSION_ID_CHANGE', false);
+define('BX_SKIP_POST_UNQUOTE', true);
+define('NO_AGENT_CHECK', true);
+define("STATISTIC_SKIP_ACTIVITY_CHECK", true);
+define('STOP_STATISTICS', true);
+define('BX_SECURITY_SHOW_MESSAGE', true);
+define('NO_KEEP_STATISTIC', 'Y');
+define('NO_AGENT_STATISTIC','Y');
+define('DisableEventsCheck', true);
+
+use Bitrix\Main\Loader;
+use Bitrix\Crm\DealTable;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Linxys\LexofficeInterface\Entity\BulkGenerationWorkersTable;
+
+
+require_once($_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php");
+
+if (Loader::includeModule("linxys.lexofficeinterface") && Loader::includeModule("crm"))
+{
+	if($_REQUEST && $_REQUEST['dealID'] && $_REQUEST['type'])
+	{
+		$dealID = intval($_REQUEST['dealID']);
+		$type = trim($_REQUEST['type']);
+
+		if($type == 'AB')
+		{
+			runABJobAction($dealID);
+		}
+
+		if($type == 'RE')
+		{
+			runREJobAction($dealID);
+		}
+	}
+}
+
+function runABJobAction($dealID)
+{
+	$isWorkerAlreadyRun = BulkGenerationWorkersTable::getWorkersInfo($dealID);
+	if (!$isWorkerAlreadyRun)
+	{
+		ModuleHelper::writeToLog($dealID, 'Started AB worker for Deal ID = ' . $dealID);
+		$statusID = BulkGenerationWorkersTable::addProcessingDealWorker($dealID);
+		$stageID = ModuleHelper::getBulkABGenerationStageID();
+
+		$obDeal = new CCrmDeal(false);
+		$arFields = ['STAGE_ID' => $stageID];
+		if(!ModuleHelper::isBulkGenerationTestMode())
+		{
+			$obDeal->update($dealID, $arFields);
+			$arErrors = [];
+			\CCrmBizProcHelper::AutoStartWorkflows(CCrmOwnerType::Deal, $dealID, CCrmBizProcEventType::Edit, $arErrors, []);
+			\Bitrix\Crm\Automation\Factory::runOnAdd(\CCrmOwnerType::Deal, $dealID);
+		} else {
+			// imitation of processing
+			sleep(1);
+		}
+
+		BulkGenerationWorkersTable::updateFinishedDealWorker($statusID);
+		ModuleHelper::writeToLog($dealID, 'Ended AB worker for Deal ID = ' . $dealID);
+	}
+}
+
+function runREJobAction($dealID)
+{
+	ModuleHelper::writeToLog($dealID, 'Started RE worker for Deal ID = ' . $dealID);
+
+	$stageID = ModuleHelper::getBulkREGenerationStageID();
+
+	$obDeal = new CCrmDeal(false);
+	$arFields = ['STAGE_ID' => $stageID];
+	if(!ModuleHelper::isBulkGenerationTestMode())
+	{
+		$obDeal->update($dealID, $arFields);
+		$arErrors = [];
+		\CCrmBizProcHelper::AutoStartWorkflows(CCrmOwnerType::Deal, $dealID, CCrmBizProcEventType::Edit, $arErrors, []);
+		\Bitrix\Crm\Automation\Factory::runOnAdd(\CCrmOwnerType::Deal, $dealID);
+	} else {
+		// imitation of processing
+		sleep(1);
+	}
+
+	ModuleHelper::writeToLog($dealID, 'Ended RE worker for Deal ID = ' . $dealID);
+}

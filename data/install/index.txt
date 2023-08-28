@@ -1,0 +1,152 @@
+<?
+use Bitrix\Main\Localization\Loc;
+
+Class linxys_lexofficeinterface extends CModule
+{
+	const MODULE_ID = 'linxys.lexofficeinterface';
+	var $MODULE_ID = 'linxys.lexofficeinterface';
+	var $WORKERS_TABLE_NAME = 'lexoffice_bulk_generation_workers';
+	var $MODULE_VERSION;
+	var $MODULE_VERSION_DATE;
+	var $MODULE_NAME;
+	var $MODULE_DESCRIPTION;
+	var $MODULE_CSS;
+	var $strError = '';
+
+	function __construct()
+	{
+		$arModuleVersion = array();
+		include(dirname(__FILE__)."/version.php");
+		$this->MODULE_VERSION = $arModuleVersion["VERSION"];
+		$this->MODULE_VERSION_DATE = $arModuleVersion["VERSION_DATE"];
+		$this->MODULE_NAME = Loc::getMessage("LINXYS.LEXOFFICE_MODULE_NAME");
+		$this->MODULE_DESCRIPTION = Loc::getMessage("LINXYS.LEXOFFICE_MODULE_DESC");
+
+		$this->PARTNER_NAME = Loc::getMessage("LINXYS.LEXOFFICE_PARTNER_NAME");
+		$this->PARTNER_URI = Loc::getMessage("LINXYS.LEXOFFICE_PARTNER_URI");
+	}
+
+	function InstallDB($arParams = array())
+	{
+		global $DB, $DBType, $APPLICATION;
+
+		$this->strError = false;
+
+		if (!$DB->Query("SELECT 'x' FROM " . $this->WORKERS_TABLE_NAME, true))
+		{
+			$this->strError = $DB->RunSQLBatch($_SERVER['DOCUMENT_ROOT']."/local/modules/". self::MODULE_ID ."/install/db/". $DBType ."/install.sql");
+		}
+
+		if ($this->strError !== false)
+		{
+			$APPLICATION->ThrowException(implode("", $this->strError));
+			return false;
+		}
+		RegisterModuleDependences('crm', 'OnAfterCrmDealAdd', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterDealAddUpdate');
+		RegisterModuleDependences('crm', 'OnAfterCrmDealUpdate', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterDealAddUpdate');
+		RegisterModuleDependences('crm', 'OnAfterCrmCompanyUpdate', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterCompanyUpdate');
+		RegisterModuleDependences('main', 'OnProlog', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'placeGenerationButton');
+		RegisterModuleDependences("pull", "OnGetDependentModule", self::MODULE_ID, "\Linxys\LexofficeInterface\CPullSchema", "OnGetDependentModule" );
+		return true;
+	}
+
+	function UnInstallDB($arParams = array())
+	{
+		global $DB, $DBType, $APPLICATION;
+
+		$this->errors = $DB->RunSQLBatch($_SERVER['DOCUMENT_ROOT']."/local/modules/". self::MODULE_ID ."/install/db/". $DBType ."/uninstall.sql");
+
+		if ($this->strError !== false)
+		{
+			$APPLICATION->ThrowException(implode("", $this->strError));
+			return false;
+		}
+		UnRegisterModuleDependences('crm', 'OnAfterCrmDealAdd', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterDealAddUpdate');
+		UnRegisterModuleDependences('crm', 'OnAfterCrmDealUpdate', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterDealAddUpdate');
+		UnRegisterModuleDependences('crm', 'OnAfterCrmCompanyUpdate', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'OnAfterCompanyUpdate');
+		UnRegisterModuleDependences('main', 'OnProlog', self::MODULE_ID, '\Linxys\LexofficeInterface\EventHandler', 'placeGenerationButton');
+		UnRegisterModuleDependences("pull", "OnGetDependentModule", self::MODULE_ID, "\Linxys\LexofficeInterface\CPullSchema", "OnGetDependentModule" );
+		return true;
+	}
+
+	function DoInstall()
+	{
+		global $APPLICATION;
+		$this->InstallDB();
+		$this->InstallFiles();
+		$this->InstallAccess();
+		RegisterModule(self::MODULE_ID);
+	}
+
+	function DoUninstall()
+	{
+		global $APPLICATION;
+		UnRegisterModule(self::MODULE_ID);
+		$this->UnInstallDB();
+		$this->UnInstallFiles();
+		$this->UnInstallAccess();
+	}
+
+	function InstallFiles()
+	{
+		CopyDirFiles($_SERVER["DOCUMENT_ROOT"] . "/local/modules/" . self::MODULE_ID . "/install/admin", $_SERVER["DOCUMENT_ROOT"] . "/bitrix/admin", true, true);
+		CopyDirFiles($_SERVER["DOCUMENT_ROOT"] . "/local/modules/" . self::MODULE_ID . "/install/tools", $_SERVER["DOCUMENT_ROOT"] . "/local/tools", true, true);
+		CopyDirFiles($_SERVER["DOCUMENT_ROOT"] . "/local/modules/" . self::MODULE_ID . "/install/js", $_SERVER["DOCUMENT_ROOT"] . "/local/js/", true, true);
+
+	}
+
+	function UnInstallFiles()
+	{
+		DeleteDirFiles($_SERVER["DOCUMENT_ROOT"] . "/local/modules/" . self::MODULE_ID . "/install/admin", $_SERVER["DOCUMENT_ROOT"] . "/bitrix/admin");
+
+		if (is_dir($p = $_SERVER['DOCUMENT_ROOT'] . '/local/modules/' . $this->MODULE_ID . '/install/tools'))
+		{
+			if ($dir = opendir($p))
+			{
+				while (false !== $item = readdir($dir))
+				{
+					if ($item == '..' || $item == '.' || !is_dir($p0 = $p.'/'.$item))
+						continue;
+
+					$dir0 = opendir($p0);
+					while (false !== $item0 = readdir($dir0))
+					{
+						if ($item0 == '..' || $item0 == '.')
+							continue;
+						DeleteDirFilesEx('/local/tools/' . $item);
+					}
+					closedir($dir0);
+				}
+				closedir($dir);
+			}
+		}
+
+		if (is_dir($p = $_SERVER['DOCUMENT_ROOT'] . '/local/modules/' . $this->MODULE_ID . '/install/js'))
+		{
+			if ($dir = opendir($p))
+			{
+				while (false !== $item = readdir($dir))
+				{
+					if ($item == '..' || $item == '.' || !is_dir($p0 = $p.'/'.$item))
+						continue;
+
+					DeleteDirFilesEx('/local/js/' . $item);
+				}
+				closedir($dir);
+			}
+		}
+	}
+
+	function InstallAccess()
+	{
+		global $APPLICATION;
+		$APPLICATION->SetFileAccessPermission('/bitrix/admin/lexoffice_webhook_receiver.php', ['2' => 'R']);
+	}
+
+	function UnInstallAccess()
+	{
+		global $APPLICATION;
+		$APPLICATION->RemoveFileAccessPermission('/bitrix/admin/lexoffice_webhook_receiver.php', ['2']);
+	}
+}
+?>

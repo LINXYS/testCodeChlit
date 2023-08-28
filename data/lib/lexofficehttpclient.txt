@@ -1,0 +1,530 @@
+<?php
+namespace Linxys\LexofficeInterface;
+
+use Bitrix\Main\Web\HttpClient;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Linxys\LexofficeInterface\EventHandler;
+
+class LexofficeHttpClient
+{
+	public $lexofficeHttpClient = false;
+	const API_URL = 'https://api.lexoffice.io/v1/';
+
+	public function __construct(array $settings = [])
+	{
+		$token = ModuleHelper::getApiToken();
+
+		if($token)
+		{
+			$this->lexofficeHttpClient = new HttpClient();
+			$this->lexofficeHttpClient->setHeader("Authorization", "Bearer " . $token, true);
+			$this->lexofficeHttpClient->setHeader("Content-Type", "application/json");
+			$this->lexofficeHttpClient->setHeader("Accept", "application/json");
+		}
+	}
+
+	public function addInvoiceChangeWebhook()
+	{
+		$endPoint = 'event-subscriptions';
+
+		$postData = [
+			'eventType' => 'invoice.changed',
+			'callbackUrl' => ModuleHelper::getInvoiceChangeCallbackUrl()
+		];
+
+		$apiResult = $this->lexofficeHttpClient->post(self::API_URL . $endPoint, json_encode($postData));
+		$apiResult = json_decode($apiResult, true);
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function deleteInvoiceChangeWebhook($webhookId)
+	{
+		$endPoint = 'event-subscriptions/' . $webhookId;
+
+		$apiResult = $this->lexofficeHttpClient->query('DELETE', self::API_URL . $endPoint);
+		$apiResult = json_decode($apiResult, true);
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function getContact($leaxofficeContactId)
+	{
+		$endPoint = 'contacts';
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $leaxofficeContactId);
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function addContact($arCompany, $arContact)
+	{
+		$endPoint = 'contacts';
+
+		$postData = [
+			'version' => 0,
+			'roles' => [
+				'customer' => [
+					'number' => ''
+				]
+			],
+			'company' => [
+				'name' => $arCompany['TITLE'],
+				'contactPersons' => [
+					[
+						'salutation' => $arContact['HONORIFIC'],
+						'firstName' => $arContact['NAME'],
+						'lastName' => $arContact['LAST_NAME']
+					]
+				],
+			],
+			'addresses' => [
+				'billing' => [
+					[
+						'street' => $arCompany[ModuleHelper::getStreetFieldCode()],
+						'zip' => $arCompany[ModuleHelper::getZipFieldCode()],
+						'city' => $arCompany[ModuleHelper::getCityFieldCode()],
+						'supplement' => $arCompany[ModuleHelper::getSupplementFieldCode()],
+					]
+				]
+			]
+		];
+
+		$apiResult = $this->lexofficeHttpClient->post(self::API_URL . $endPoint, json_encode($postData));
+		$apiResult = json_decode($apiResult, true);
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function updateContact($arCompany, $arContact)
+	{
+		$endPoint = 'contacts';
+
+		$arPerson = [];
+		if ($arContact) {
+			$arPerson[] = [
+				'salutation' => $arContact['HONORIFIC'],
+				'firstName' => $arContact['NAME'],
+				'lastName' => $arContact['LAST_NAME']
+			];
+		}
+
+		$postData = [
+			'version' => $arCompany['VERSION'],
+			'roles' => [
+				'customer' => [
+					'number' => ''
+				]
+			],
+			'company' => [
+				'name' => $arCompany['TITLE'],
+				'contactPersons' => $arPerson,
+			],
+			'addresses' => [
+				'billing' => [
+					[
+						'street' => $arCompany[ModuleHelper::getStreetFieldCode()],
+						'zip' => $arCompany[ModuleHelper::getZipFieldCode()],
+						'city' => $arCompany[ModuleHelper::getCityFieldCode()],
+						'supplement' => $arCompany[ModuleHelper::getSupplementFieldCode()],
+					]
+				]
+			]
+		];
+
+		$apiResult = $this->lexofficeHttpClient->query('PUT', self::API_URL . $endPoint . '/' . $arCompany[ModuleHelper::getLexOfficeContactFieldCode()], json_encode($postData));
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function getInvoice($leaxofficeInvoiceId)
+	{
+		$endPoint = 'invoices';
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $leaxofficeInvoiceId);
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function getOrderConfirmation($lexofficeOrderConfirmationId)
+	{
+		$endPoint = 'order-confirmations';
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $lexofficeOrderConfirmationId);
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function addInvoice($arDeal, $lexofficeContactId)
+	{
+		$endPoint = 'invoices';
+
+		$postData = [
+			'version' => 0,
+			'voucherDate' => date('Y-m-d\T00:00:00.000+00:00', time()),
+			'address' => [
+				'contactId' => $lexofficeContactId
+			],
+			'totalPrice' => [
+				'currency' => $arDeal['CURRENCY_ID']
+			],
+			'taxConditions' => [
+				'taxType' => 'net'
+			],
+			'shippingConditions' => [
+				'shippingType' => 'none'
+			],
+		];
+
+		$leistungsdatumField = ModuleHelper::getLeistungsdatumFieldCode();
+		$leistungsendeField = ModuleHelper::getLeistungsendeFieldCode();
+		if($arDeal[$leistungsdatumField])
+		{
+			$postData['shippingConditions'] = [
+				'shippingType' => "service",
+				'shippingDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsdatumField])),
+			];
+
+			if ($arDeal[$leistungsendeField]) {
+				$postData['shippingConditions'] = [
+					'shippingType' => "serviceperiod",
+					'shippingDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsdatumField])),
+					'shippingEndDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsendeField])),
+				];
+			}
+
+		}
+
+		// add product rows
+		foreach($arDeal['PRODUCT_ROWS'] as $i => $product)
+		{
+			$postData['lineItems'][$i] = [
+				'type' => 'custom',
+				'name' => $product['PRODUCT_NAME'],
+				'description' => null,
+				'quantity' => intval($product['QUANTITY']),
+				'unitName' => $product['MEASURE_NAME'],
+				'discountPercentage' => $product['DISCOUNT_RATE'],
+			];
+
+			if($product['TAX_RATE'] == 0)
+			{
+				// vat is zero
+				$postData['lineItems'][$i]['unitPrice'] = [
+					'currency' => $arDeal['CURRENCY_ID'],
+					'netAmount' => $product['PRICE_NETTO'],
+					'taxRatePercentage' => 0
+				];
+			} else {
+				if($product['TAX_INCLUDED'] == "Y")
+				{
+					// tax (vat) included
+					$postData['lineItems'][$i]['unitPrice'] = [
+						'currency' => $arDeal['CURRENCY_ID'],
+						'netAmount' => $product['PRICE_NETTO'],
+						'taxRatePercentage' => $product['TAX_RATE'],
+					];
+					$postData['lineItems'][$i]['discountPercentage'] = $product['DISCOUNT_RATE'];
+				} else {
+					// tax (vat) not included
+					$postData['lineItems'][$i]['unitPrice'] = [
+						'currency' => $arDeal['CURRENCY_ID'],
+						'netAmount' => $product['PRICE_NETTO'],
+						'taxRatePercentage' => $product['TAX_RATE']
+					];
+				}
+			}
+		}
+
+		if ($arDeal['REMARK']) {
+			$postData['remark'] = $arDeal['REMARK'];
+		}
+
+		if ($arDeal['PAYMENT_TERM_LABEL']) {
+			$postData['paymentConditions'] = [
+				'paymentTermDuration' => $arDeal['PAYMENT_TERM_DURATION'],
+				'paymentTermLabel' => $arDeal['PAYMENT_TERM_LABEL']
+			];
+		}
+
+		$apiResult = $this->lexofficeHttpClient->post(self::API_URL . $endPoint . "?finalize=true", json_encode($postData));
+		$apiResult = json_decode($apiResult, true);
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function addOrderConfirmation($arDeal, $lexofficeContactId)
+	{
+		$endPoint = 'order-confirmations';
+
+		$postData = [
+			'version' => 0,
+			'voucherDate' => date('Y-m-d\T00:00:00.000+00:00', time()),
+			'address' => [
+				'contactId' => $lexofficeContactId
+			],
+			'totalPrice' => [
+				'currency' => $arDeal['CURRENCY_ID']
+			],
+			'taxConditions' => [
+				'taxType' => 'net'
+			],
+			'shippingConditions' => [
+				'shippingType' => 'none'
+			]
+		];
+
+		$leistungsdatumField = ModuleHelper::getLeistungsdatumFieldCode();
+		$leistungsendeField = ModuleHelper::getLeistungsendeFieldCode();
+		if($arDeal[$leistungsdatumField])
+		{
+			$postData['shippingConditions'] = [
+				'shippingType' => "service",
+				'shippingDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsdatumField])),
+			];
+
+			if ($arDeal[$leistungsendeField]) {
+				$postData['shippingConditions'] = [
+					'shippingType' => "serviceperiod",
+					'shippingDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsdatumField])),
+					'shippingEndDate' => date('Y-m-d\T00:00:00.000+00:00', MakeTimeStamp($arDeal[$leistungsendeField])),
+				];
+			}
+
+		}
+
+		// add product rows
+		foreach($arDeal['PRODUCT_ROWS'] as $i => $product)
+		{
+			$postData['lineItems'][$i] = [
+				'type' => 'custom',
+				'name' => $product['PRODUCT_NAME'],
+				'description' => null,
+				'quantity' => intval($product['QUANTITY']),
+				'unitName' => $product['MEASURE_NAME'],
+				'discountPercentage' => $product['DISCOUNT_RATE'],
+			];
+
+			if($product['TAX_RATE'] == 0)
+			{
+				// vat is zero
+				$postData['lineItems'][$i]['unitPrice'] = [
+					'currency' => $arDeal['CURRENCY_ID'],
+					'netAmount' => $product['PRICE_NETTO'],
+					'taxRatePercentage' => 0
+				];
+			} else {
+				if($product['TAX_INCLUDED'] == "Y")
+				{
+					// tax (vat) included
+					$postData['lineItems'][$i]['unitPrice'] = [
+						'currency' => $arDeal['CURRENCY_ID'],
+						'netAmount' => $product['PRICE_NETTO'],
+						'taxRatePercentage' => $product['TAX_RATE'],
+					];
+					$postData['lineItems'][$i]['discountPercentage'] = $product['DISCOUNT_RATE'];
+				} else {
+					// tax (vat) not included
+					$postData['lineItems'][$i]['unitPrice'] = [
+						'currency' => $arDeal['CURRENCY_ID'],
+						'netAmount' => $product['PRICE_NETTO'],
+						'taxRatePercentage' => $product['TAX_RATE']
+					];
+				}
+			}
+		}
+
+		if ($arDeal['ORDER_CONFIRMATION_REMARK']) {
+			$postData['remark'] = $arDeal['ORDER_CONFIRMATION_REMARK'];
+		}
+
+		if ($arDeal['AB_PAYMENT_TERM_LABEL']) {
+			$postData['paymentConditions'] = [
+				'paymentTermDuration' => $arDeal['AB_PAYMENT_TERM_DURATION'],
+				'paymentTermLabel' => $arDeal['AB_PAYMENT_TERM_LABEL']
+			];
+		}
+
+		if ($arDeal['ORDER_CONFIRMATION_INTRODUCTION']) {
+			$postData['introduction'] = $arDeal['ORDER_CONFIRMATION_INTRODUCTION'];
+		}
+
+		if ($arDeal['ORDER_CONFIRMATION_DELIVERY_TERMS']) {
+			$postData['deliveryTerms'] = $arDeal['ORDER_CONFIRMATION_DELIVERY_TERMS'];
+		}
+
+		$apiResult = $this->lexofficeHttpClient->post(self::API_URL . $endPoint, json_encode($postData));
+		$apiResult = json_decode($apiResult, true);
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function downloadLexofficeDocument($documentFileId)
+	{
+		$endPoint = 'files';
+
+		$this->lexofficeHttpClient->setHeader("Content-Type", "", true);
+		$this->lexofficeHttpClient->setHeader("Accept", "", true);
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $documentFileId);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function renderOrderConfirmationDocument($orderConfirmationId)
+	{
+		$endPoint = 'order-confirmations';
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $orderConfirmationId . "/document");
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function renderInvoiceDocument($invoiceId)
+	{
+		$endPoint = 'invoices';
+
+		$apiResult = $this->lexofficeHttpClient->get(self::API_URL . $endPoint . "/" . $invoiceId . "/document");
+		$apiResult = json_decode($apiResult, true);
+
+		$arResult = [
+			'apiResult' => $apiResult
+		];
+
+		$this->getStatusAnError($arResult);
+
+		return $arResult;
+	}
+
+	public function getAllContacts()
+	{
+		$result = $this->lexofficeHttpClient->get(self::API_URL . "contacts/");
+		$result = json_decode($result, true);
+		return $result;
+	}
+
+	private function getStatusAnError(&$arResult)
+	{
+		$statusCode = $this->lexofficeHttpClient->getStatus();
+		$arResult['statusCode'] = $statusCode;
+		$arResult['statusText'] = '';
+		if($statusCode >= 400)
+		{
+			// list of codes - https://developers.lexoffice.io/docs/#http-status-codes
+			switch ($statusCode)
+			{
+				case 400:
+					$arResult['statusText'] = 'Malformed syntax or a bad query.';
+					break;
+				case 401:
+					$arResult['statusText'] = 'Action requires user authentication.';
+					break;
+				case 402:
+					$arResult['statusText'] = 'Action not accessible due to a lexoffice contract issue. For details see Error Codes.';
+					break;
+				case 403:
+					$arResult['statusText'] = 'Authenticated but insufficient scope or insufficient access rights in lexoffice.';
+					break;
+				case 404:
+					$arResult['statusText'] = 'Requested resource does no exist (anymore).';
+					break;
+				case 405:
+					$arResult['statusText'] = 'Method not allowed on resource.';
+					break;
+				case 406:
+					$arResult['statusText'] = 'Validation issues due to invalid data.';
+					break;
+				case 409:
+					$arResult['statusText'] = 'Indicates that the request is not allowed due to the current state of the resource. For instance, an outdated version field send with PUT.';
+					break;
+				case 415:
+					$arResult['statusText'] = 'Missing Content-Type header for POST and PUT requests. Only application/json is supported besides file uploads where multipart/form-data is expected.';
+					break;
+				case 429:
+					$arResult['statusText'] = 'May occur if the endpoint exceeds the limit of throttling. This request should be called again at a later time.';
+					break;
+				case 500:
+					$arResult['statusText'] = 'Internal server error. Please get in contact with us.';
+					break;
+				case 501:
+					$arResult['statusText'] = 'Requested HTTP operation not supported.';
+					break;
+				case 503:
+					$arResult['statusText'] = 'Unable to handle the request temporarily.';
+					break;
+				case 504:
+					$arResult['statusText'] = 'The proxied request from the gateway to the targeted services has timed out. This error occurs when the server did not answer before the request timeout of 30 seconds. It is possible that your request has been processed successfully.';
+					break;
+				default:
+					$arResult['statusText'] = 'Unknow error';
+					break;
+			}
+		}
+	}
+}

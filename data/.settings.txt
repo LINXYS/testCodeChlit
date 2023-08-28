@@ -1,0 +1,12 @@
+<?php
+
+return [
+	'controllers' => [
+		'value' => [
+			'namespaces' => [
+				'\\Linxys\\LexofficeInterface\\Controller' => 'api'
+			]
+		],
+		'readonly' => true
+	]
+];

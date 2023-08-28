@@ -1,0 +1,112 @@
+<?php
+namespace Linxys\LexofficeInterface;
+
+use Bitrix\Main\Loader;
+use Bitrix\Crm\DealTable;
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\HttpApplication;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Linxys\LexofficeInterface\LexofficeHttpClient;
+
+class WebhookHandler
+{
+	public static function updateDealStatus($arFields, $request)
+	{
+		Loader::includeModule('crm');
+
+		$lexOfficeInvoiceID = $arFields['resourceId'];
+		$xLxoSignatureHeader = $request->getHeader('X-Lxo-Signature');
+		if($xLxoSignatureHeader)
+		{
+			// 1. base64 decode header
+			$xLxoSignatureHeader = base64_decode($xLxoSignatureHeader);
+
+			// 2. get pub key
+			$pubKey = openssl_get_publickey(file_get_contents(__DIR__ . '/../pubkey/public_key.pub'));
+
+			// 3. verify
+			if(openssl_verify($arFields['rawJson'], $xLxoSignatureHeader, $pubKey, OPENSSL_ALGO_SHA512))
+			{
+				$dealLexofficeInvoiceIdField = ModuleHelper::getLexOfficeInvoiceFieldCode();
+				$dealLexofficeInvoiceStatusField = ModuleHelper::getLexOfficeInvoiceStatusFieldCode();
+
+				$invoiceGetClient = new LexofficeHttpClient();
+				$arLexofficeInvoice = $invoiceGetClient->getInvoice($lexOfficeInvoiceID);
+
+				if($arLexofficeInvoice["apiResult"]['id'])
+				{
+					$obContext = \Bitrix\Main\HttpApplication::getInstance()->getContext();
+					$obServer = $obContext->getServer();
+					$portalUrl = $obServer->get('HTTP_ORIGIN');
+
+					// update status in deal field
+					// 1. Search deal
+					$arDeal = DealTable::getRow([
+						'filter' => [
+							$dealLexofficeInvoiceIdField => $lexOfficeInvoiceID
+						],
+						'select' => ['ID', 'ASSIGNED_BY_ID']
+					]);
+
+					if($arDeal)
+					{
+						// 2. update status
+						$invoiceStatus = '';
+						switch ($arLexofficeInvoice["apiResult"]['voucherStatus'])
+						{
+							case 'draft':
+								$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_DRAFT");
+								break;
+							case 'open':
+								$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_OPEN");
+								break;
+							case 'paid':
+								$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_PAID");
+								break;
+							case 'voided':
+								$invoiceStatus = Loc::getMessage("LINXYS.LEXOFFICE_INVOICE_STATUS_VOIDED");
+								break;
+						}
+						$rsEnum = \CUserFieldEnum::GetList([], [
+							"USER_FIELD_NAME" => $dealLexofficeInvoiceStatusField,
+							"VALUE" => $invoiceStatus
+						]);
+						$arEnum = $rsEnum->GetNext();
+
+						$dealFields = [$dealLexofficeInvoiceStatusField => $arEnum['ID']];
+						$resUpdateDeal = DealTable::update($arDeal['ID'], $dealFields);
+						if(!$resUpdateDeal->isSuccess())
+						{
+							// send error to modifier
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_ERROR_UPDATE_INVOICE", [
+								'#INVOICE_URL#' => "https://app.lexoffice.de/permalink/invoices/view/" . $dealLexofficeInvoiceIdField,
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+								'#STATUS#' => $invoiceStatus,
+							]);
+							ModuleHelper::sendImNotify($arDeal['ASSIGNED_BY_ID'], $message);
+							self::writeToLog($message);
+						} else {
+							$message = Loc::getMessage("LINXYS.LEXOFFICE_SUCCESS_UPDATE_INVOICE_STATUS", [
+								'#INVOICE_URL#' => "https://app.lexoffice.de/permalink/invoices/view/" . $dealLexofficeInvoiceIdField,
+								'#DEAL_URL#' => $portalUrl . "/crm/deal/details/" . $arDeal['ID'] . "/",
+								'#STATUS#' => $invoiceStatus,
+							]);
+							self::writeToLog($message);
+						}
+					}
+				}
+			}
+			openssl_free_key($pubKey);
+		}
+	}
+
+	public static function writeToLog($arData, $title = '')
+	{
+		$logFilePath = ModuleHelper::getLogFilePath();
+		if($logFilePath)
+		{
+			define("LOG_FILENAME", $_SERVER["DOCUMENT_ROOT"] . $logFilePath . date("Y-m-d") . '_lexoffice_webhook.log');
+			AddMessage2Log($arData, $title);
+		}
+	}
+}

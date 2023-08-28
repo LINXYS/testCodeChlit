@@ -1,0 +1,101 @@
+<?php
+namespace Linxys\LexofficeInterface\Entity;
+
+use	Bitrix\Main\ORM\Fields\IntegerField;
+use	Bitrix\Main\ORM\Fields\StringField;
+use	Bitrix\Main\ORM\Data\DataManager;
+use Bitrix\Main\Localization\Loc;
+use	Bitrix\Main\Loader;
+use	Bitrix\Main\Entity;
+use	Bitrix\Main;
+
+Loc::loadMessages(__FILE__);
+
+/**
+ * Class BulkGenerationWorkersTable
+ *
+ * Fields:
+ * <ul>
+ * <li> ID int mandatory
+ * <li> DEAL_ID int mandatory
+ * </ul>
+ *
+ * @package Bitrix\External
+ **/
+
+class BulkGenerationWorkersTable extends Main\Entity\DataManager
+{
+	/**
+	 * Returns DB table name for entity.
+	 *
+	 * @return string
+	 */
+	public static function getTableName()
+	{
+		return 'lexoffice_bulk_generation_workers';
+	}
+
+	/**
+	 * Returns entity map definition.
+	 *
+	 * @return array
+	 */
+	public static function getMap()
+	{
+		return [
+			'ID' => new IntegerField(
+				'ID',
+				[
+					'primary' => true,
+					'autocomplete' => true,
+					'title' => Loc::getMessage('ENTITY_ID')
+				]
+			),
+			'DEAL_ID' => new IntegerField(
+				'DEAL_ID',
+				[
+					'title' => Loc::getMessage('DEAL_ID')
+				]
+			),
+			'STATUS' => new StringField(
+				'STATUS',
+				[
+					'required' => true,
+					'title' => Loc::getMessage('STATUS')
+				]
+			)
+		];
+	}
+
+	public static function addProcessingDealWorker($dealID)
+	{
+		$result = BulkGenerationWorkersTable::add(['DEAL_ID'=> $dealID, 'STATUS' => 'processing']);
+
+		$id = '';
+		if ($result->isSuccess())
+		{
+			$id = $result->getId();
+		}
+		return $id;
+	}
+
+	public static function updateFinishedDealWorker($statusID)
+	{
+		BulkGenerationWorkersTable::update($statusID, ['STATUS' => 'finished']);
+	}
+
+	public static function getWorkersInfo($arDealIDs)
+	{
+		$rsWorkersStatus = BulkGenerationWorkersTable::getList(
+			[
+				'filter' => ['DEAL_ID' => $arDealIDs]
+			]
+		);
+		$arWorkersStatus = [];
+		while($status = $rsWorkersStatus->fetch()) {
+			$arWorkersStatus[$status['DEAL_ID']] = $status['STATUS'];
+		}
+
+		return $arWorkersStatus;
+	}
+}

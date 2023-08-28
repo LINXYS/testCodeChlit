@@ -1,0 +1,468 @@
+<?
+namespace Linxys\LexofficeInterface;
+
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\Loader;
+
+Class ModuleHelper
+{
+	const MODULE_ID = "linxys.lexofficeinterface";
+	const TTL_CACHE = 86400; // in sec
+
+	public static function getModuleOptions()
+	{
+		$obCache = new \CPHPCache();
+		$cacheTime = self::TTL_CACHE;
+		$cacheId = 'Options' . self::MODULE_ID;
+		$cachePath = self::MODULE_ID;
+
+		if($obCache->InitCache($cacheTime, $cacheId, $cachePath))
+		{
+			$vars = $obCache->GetVars();
+			$result = $vars['result'];
+		}
+		elseif($obCache->StartDataCache())
+		{
+			$result = Option::getForModule(self::MODULE_ID);
+			$obCache->EndDataCache(array('result' => $result));
+		}
+		return $result;
+	}
+
+	public static function getInvoiceChangeCallbackUrl()
+	{
+		$options = self::getModuleOptions();
+		return $options['API_INVOICE_CHANGE_CALLBACK_URL'];
+	}
+
+	public static function getApiToken()
+	{
+		$options = self::getModuleOptions();
+		return $options['API_TOKEN'];
+	}
+
+	public static function getLogFilePath()
+	{
+		$options = self::getModuleOptions();
+		return $options['LOG_FILEPATH'];
+	}
+
+	public static function getTriggeredPaymentStageId()
+	{
+		$options = self::getModuleOptions();
+		return $options['TRIGGERED_PAYMENT_STAGE_ID'];
+	}
+
+	public static function getNoNeedInvoiceStageId()
+	{
+		$options = self::getModuleOptions();
+		return $options['NO_NEED_CREATE_INVOICE_STAGE_ID'];
+	}
+
+	public static function getNoNeedOrderConfirmationStageId()
+	{
+		$options = self::getModuleOptions();
+		return $options['NO_NEED_CREATE_ORDER_CONFIRMATION_STAGE_ID'];
+	}
+
+	public static function getSupplementFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['SUPPLEMENT'];
+	}
+
+	public static function getSalutationFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['SALUTATION'];
+	}
+
+	public static function getKundenNumberFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['KUNDEN'];
+	}
+
+	public static function getStreetFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['STREET'];
+	}
+
+	public static function getZipFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['ZIP_CODE'];
+	}
+
+	public static function getCityFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['CITY'];
+	}
+
+	public static function getLexOfficeContactFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_CONTACT_ID'];
+	}
+
+	public static function getLexOfficeInvoiceFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_ID'];
+	}
+
+	public static function getLexOfficeInvoiceStatusFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_STATUS'];
+	}
+
+	public static function getLexOfficeInvoiceNumberFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_NUMBER'];
+	}
+
+	public static function getLeistungsdatumFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEISTUNGSDATUM'];
+	}
+
+	public static function getLeistungsendeFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEISTUNGSENDE'];
+	}
+
+	public static function getDueDateFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['DUE_DATE'];
+	}
+
+	public static function getPaketFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_PAKET'];
+	}
+
+	public static function getPaketValueNoNeedABREForCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_PAKET_VALUE_NO_NEED_CREATE_AB_RE'];
+	}
+
+	public static function getInvoiceLinkFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_LINK'];
+	}
+
+	public static function getInvoiceAdditionalLinkFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_ADDITIONAL_LINK'];
+	}
+
+	public static function getLexOfficeInvoiceTypeFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_TYPE'];
+	}
+	public static function getBeforeSepaRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['BEFORE_SEPA_REMARK_TEXT'];
+	}
+	public static function getBeforeInvoiceRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['BEFORE_INVOICE_REMARK_TEXT'];
+	}
+	public static function getRemarkCodes()
+	{
+		$options = self::getModuleOptions();
+		return $options['REMARK'];
+	}
+	public static function getAfterSepaRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['AFTER_SEPA_REMARK_TEXT'];
+	}
+	public static function getAfterInvoiceRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['AFTER_INVOICE_REMARK_TEXT'];
+	}
+
+	public static function getInvoicePaymentTermLabelSepaText()
+	{
+		$options = self::getModuleOptions();
+		return $options['PAYMENT_TERM_LABEL_SEPA'];
+	}
+
+	public static function getInvoicePaymentTermLabelInvoiceText()
+	{
+		$options = self::getModuleOptions();
+		return $options['PAYMENT_TERM_LABEL_INVOICE'];
+	}
+
+	public static function getInvoicePaymentTermDuration()
+	{
+		$options = self::getModuleOptions();
+		return $options['PAYMENT_TERM_DURATION'];
+	}
+
+	public static function getInvoiceFileFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_INVOICE_DOCUMENT'];
+	}
+
+	public static function getTriggeredOrderConfirmationStageId()
+	{
+		$options = self::getModuleOptions();
+		return $options['TRIGGERED_ORDER_CONFIRMATION_STAGE_ID'];
+	}
+
+	public static function getLexOfficeOrderConfirmationFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_ID'];
+	}
+
+	public static function getLexOfficeOrderConfirmationNumberFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_NUMBER'];
+	}
+
+	public static function getOrderConfirmationLinkFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_LINK'];
+	}
+
+	public static function getOrderConfirmationAdditionalLinkFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_ADDITIONAL_LINK'];
+	}
+
+	public static function getOrderConfirmationBeforeRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_BEFORE_REMARK_TEXT'];
+	}
+
+	public static function getOrderConfirmationRemarkCodes()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_REMARK'];
+	}
+
+	public static function getOrderConfirmationAfterRemarkText()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_AFTER_REMARK_TEXT'];
+	}
+
+	public static function getOrderConfirmationPaymentTermLabelSepaText()
+	{
+		$options = self::getModuleOptions();
+		return $options['AB_PAYMENT_TERM_LABEL_SEPA'];
+	}
+
+	public static function getOrderConfirmationPaymentTermLabelInvoiceText()
+	{
+		$options = self::getModuleOptions();
+		return $options['AB_PAYMENT_TERM_LABEL_INVOICE'];
+	}
+
+	public static function getOrderConfirmationPaymentTermDuration()
+	{
+		$options = self::getModuleOptions();
+		return $options['AB_PAYMENT_TERM_DURATION'];
+	}
+
+	public static function getOrderConfirmationIntroductionText()
+	{
+		$options = self::getModuleOptions();
+		return $options['ORDER_CONFIRMATION_INTRODUCTION_TEXT'];
+	}
+
+	public static function getOrderConfirmationDeliveryTermsText()
+	{
+		$options = self::getModuleOptions();
+		return $options['ORDER_CONFIRMATION_DELIVERY_TERMS_TEXT'];
+	}
+
+	public static function getOrderConfirmationFileFieldCode()
+	{
+		$options = self::getModuleOptions();
+		return $options['LEXOFFICE_ORDER_CONFIRMATION_DOCUMENT'];
+	}
+
+	public static function getBGSystemGroupID()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_GENERATION_SYSTEM_USERS_GROUP'];
+	}
+
+	public static function isBulkGenerationRunning()
+	{
+		return (Option::get(self::MODULE_ID, 'BULK_GENERATION_RUNNING') == "N") ? 0 : true;
+	}
+
+	public static function isBulkGenerationStop()
+	{
+		return (Option::get(self::MODULE_ID, 'BULK_GENERATION_STOP') == "N") ? 0 : true;
+	}
+
+	public static function getStartBulkABGenerationStageID()
+	{
+		$options = self::getModuleOptions();
+		return $options['START_BULK_AB_GENERATION_STAGE_ID'];
+	}
+
+	public static function getStartBulkREGenerationStageID()
+	{
+		$options = self::getModuleOptions();
+		return $options['START_BULK_RE_GENERATION_STAGE_ID'];
+	}
+
+	public static function getABPipeline()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_AB_GENERATION_PIPELINE'];
+	}
+
+	public static function getREPipeline()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_RE_GENERATION_PIPELINE'];
+	}
+
+	public static function getBulkREGenerationStageID()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_RE_GENERATION_STAGE_ID'];
+	}
+
+	public static function getBulkABGenerationStageID()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_AB_GENERATION_STAGE_ID'];
+	}
+
+	public static function getBulkGenerationWorkersNumber()
+	{
+		$options = self::getModuleOptions();
+		return intval($options['WORKERS_NUMBER_FOR_BULK_GENERATION']);
+	}
+
+	public static function getBulkGenerationCoefficient()
+	{
+		$options = self::getModuleOptions();
+		return floatval($options['COEFFICIENT_FOR_BULK_GENERATION']);
+	}
+
+	public static function getBulkGenerationLoggingValue()
+	{
+		$options = self::getModuleOptions();
+		return ($options['BULK_GENERATION_LOGGING'] == "N") ? false : true;
+	}
+
+	public static function isBulkGenerationTestMode()
+	{
+		$options = self::getModuleOptions();
+		return ($options['BULK_GENERATION_TEST_MODE'] == "N") ? false : true;
+	}
+
+	public static function getBulkGenerationDelayInTestMode()
+	{
+		$options = self::getModuleOptions();
+		$delay = intval($options['BULK_GENERATION_BJ_DELEAY']);
+		if(!$delay || $delay < 0)
+		{
+			$delay = 0;
+		}
+		return $delay;
+	}
+
+	public static function getBulkUserLogin()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_USER_LOGIN'];
+	}
+
+	public static function getBulkUserPassword()
+	{
+		$options = self::getModuleOptions();
+		return $options['BULK_USER_PWD'];
+	}
+
+	public static function clearCache()
+	{
+		$obCache = new \CPHPCache();
+		$cacheId = 'Options' . self::MODULE_ID;
+		$cachePath = self::MODULE_ID;
+		$obCache->Clean($cacheId, $cachePath);
+	}
+
+	public static function sendImNotify($userId, $message)
+	{
+		if (Loader::includeModule('im'))
+		{
+			$res = \CIMNotify::Add(array(
+				'FROM_USER_ID' => 0,
+				'TO_USER_ID' => $userId,
+				'SYSTEM' => Y,
+				'MESSAGE' => $message
+			));
+		}
+	}
+
+	public static function writeToLog($arData, $title = '')
+	{
+		$logFilePath = self::getLogFilePath();
+		if($logFilePath && self::getBulkGenerationLoggingValue())
+		{
+			define("LOG_FILENAME", $_SERVER["DOCUMENT_ROOT"] . $logFilePath . date("Y-m-d") . '_lexoffice.log');
+			AddMessage2Log($arData, $title);
+		}
+	}
+
+	public static function sendProgressBarPullCommand($entity, $total, $current)
+	{
+		if(Loader::includeModule('pull'))
+		{
+			\CPullStack::AddShared([
+				'module_id' => self::MODULE_ID,
+				'command' => 'updateBulkGenerationProgressBar',
+				'params' => [
+					'entity' => $entity,
+					'total' => intval($total),
+					'current' => intval($current)
+				]
+			]);
+		}
+	}
+
+	public static function sendStartStopBulkGenerationPullCommand($command)
+	{
+		if(Loader::includeModule('pull'))
+		{
+			\CPullStack::AddShared([
+				'module_id' => self::MODULE_ID,
+				'command' => 'updateStartStopButtonBulkGeneration',
+				'params' => [
+					'command' => $command
+				]
+			]);
+		}
+	}
+}

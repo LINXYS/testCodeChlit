@@ -1,0 +1,42 @@
+<?php
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_MISSING_COMPANY"] = "Error creating invoice in Lexoffice.[BR]No company defined for the [URL=#DEAL_URL#]deal[/URL].";
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_MISSING_COMPANY"] = "Error creating order confirmation in Lexoffice.[BR]No company defined for the [URL=#DEAL_URL#]deal[/URL].";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_COMPANY_INVALID_DATA"] = "Error adding [URL=#COMPANY_URL#]company[/URL] in Lexoffice.[BR]#ENTRY#Status Code: #STATUS_CODE#[BR]Status text: #STATUS_TEXT#";
+$MESS["LINXYS.LEXOFFICE_ERROR_INVALID_VALUE"] = "Invalid value(s):[BR]";
+$MESS["LINXYS.LEXOFFICE_ERROR_MISSING_ENTITY"] = "Missing data:[BR]";
+$MESS["LINXYS.LEXOFFICE_ERROR_UPDATE_COMPANY"] = "Error updating the [URL=#COMPANY_URL#]company[/URL] with data from Lexoffice.<br>Created lexoffice contact url: #LEXOFFICE_CONTACT_URL#<br>ID: #LEXOFFICE_CONTACT_ID#<br>Kunden Nummer: #LEXOFFICE_CONTACT_KUNDEN_NUMMBER#";
+
+$MESS["LINXYS.LEXOFFICE_DEAL_ALREADY_HAVE_INVOICE"] = "The [URL=#DEAL_URL#]deal[/URL] already have invoice in Lexoffice.";
+$MESS["LINXYS.LEXOFFICE_DEAL_ALREADY_HAVE_ORDER_CONFIRMATION"] = "The [URL=#DEAL_URL#]deal[/URL] already have order confirmation in Lexoffice.";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_DOWNLOAD_INVOICE_FILE"] = "Error download invoice file from Lexoffice for the [URL=#DEAL_URL#]deal[/URL].";
+$MESS["LINXYS.LEXOFFICE_ERROR_DOWNLOAD_ORDER_CONFIRMATION_FILE"] = "Error download order confirmation file from Lexoffice for the [URL=#DEAL_URL#]deal[/URL].";
+$MESS["LINXYS.LEXOFFICE_ERROR_RENDER_INVOICE_FILE"] = "Error render invoice file in Lexoffice for the [URL=#DEAL_URL#]deal[/URL].";
+$MESS["LINXYS.LEXOFFICE_ERROR_RENDER_ORDER_CONFIRMATION_FILE"] = "Error render order confirmation file in Lexoffice for the [URL=#DEAL_URL#]deal[/URL].";
+
+$MESS["LINXYS.LEXOFFICE_INVOICE_STATUS_DRAFT"] = "Entwurf";
+$MESS["LINXYS.LEXOFFICE_INVOICE_STATUS_OPEN"] = "Offen";
+$MESS["LINXYS.LEXOFFICE_INVOICE_STATUS_PAID"] = "Bezahlt";
+$MESS["LINXYS.LEXOFFICE_INVOICE_STATUS_VOIDED"] = "Annuliert";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_MISSING_B24_INVOICE"] = "Error creating invoice in Lexoffice.[BR]No invoice generated for the [URL=#DEAL_URL#]deal[/URL].";
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_MISSING_B24_ORDER_CONFIRMATION"] = "Error creating order confirmation in Lexoffice.[BR]No order confirmation generated for the [URL=#DEAL_URL#]deal[/URL].";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_INVALID_DATA_1"] = "Error adding invoice for [URL=#DEAL_URL#]deal[/URL] in Lexoffice.[BR]Error message: #MESSAGE#[BR]#DETAIL#Status Code: #STATUS_CODE#[BR]Status text: #STATUS_TEXT#";
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_INVALID_DATA_1"] = "Error adding order confirmation for [URL=#DEAL_URL#]deal[/URL] in Lexoffice.[BR]Error message: #MESSAGE#[BR]#DETAIL#Status Code: #STATUS_CODE#[BR]Status text: #STATUS_TEXT#";
+
+$MESS["LINXYS.LEXOFFICE_INVOICE_SEPA_TYPE"] = "Sepa-Lastschriftmandat";
+$MESS["LINXYS.LEXOFFICE_INVOICE_RECHNUNG_TYPE"] = "Ich wünsche Zahlung auf Rechnung";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_INVOICE_DETAIL"] = "Details:[BR]";
+$MESS["LINXYS.LEXOFFICE_ERROR_CREATING_ORDER_CONFIRMATION_DETAIL"] = "Details:[BR]";
+$MESS["LINXYS.LEXOFFICE_ERROR_UPDATE_DEAL"] = "Error updating the [URL=#DEAL_URL#]deal[/URL] with data from Lexoffice.";
+
+$MESS["LINXYS.LEXOFFICE_SUCCESS_CREATED_INVOICE"] = "The [URL=#INVOICE_URL#]invoice[/URL] for the [URL=#DEAL_URL#]deal[/URL] was seccessfully created.";
+$MESS["LINXYS.LEXOFFICE_SUCCESS_CREATED_ORDER_CONFIRMATION"] = "The [URL=#ORDER_CONFIRMATION_URL#]order confirmation[/URL] for the [URL=#DEAL_URL#]deal[/URL] was seccessfully created.";
+
+$MESS["LINXYS.LEXOFFICE_ERROR_UPDATING_LEXOFFICE_CONTACT"] = "Error updating contact for [URL=#COMPANY_URL#]company[/URL] in Lexoffice.[BR]Status Code: #STATUS_CODE#[BR]Status text: #STATUS_TEXT#";
+
+$MESS["LINXYS.LEXOFFICE_DEAL_START_BULK_TITLE"] = "#TYPE# generating start";
+$MESS["LINXYS.LEXOFFICE_DEAL_STOP_BULK_TITLE"] = "Stop #TYPE# generating";

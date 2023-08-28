@@ -1,0 +1,6 @@
+<?
+$MESS["LINXYS.LEXOFFICE_MODULE_NAME"] = "Lexoffice Interface";
+$MESS["LINXYS.LEXOFFICE_MODULE_DESC"] = "Module for the interface to Lexoffice";
+$MESS["LINXYS.LEXOFFICE_PARTNER_NAME"] = "Linxys";
+$MESS["LINXYS.LEXOFFICE_PARTNER_URI"] = "https://www.linxys.ch/";
+?>

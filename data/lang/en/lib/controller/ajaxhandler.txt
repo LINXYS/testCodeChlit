@@ -1,0 +1,4 @@
+<?php
+$MESS["LINXYS.LEXOFFICE_AJAXHANDLER_DEALS_NOT_FOUND"] = "No deals found to generate the #TYPE#";
+$MESS["LINXYS.LEXOFFICE_AJAXHANDLER_DEALS_GENERATE_START"] = "Start of work on generation #TYPE#, #COUNT# deal(s) will be processed";
+

@@ -1,0 +1,559 @@
+<?php
+defined('B_PROLOG_INCLUDED') || die;
+
+/**
+ * @var string $mid module id from GET
+ */
+
+use Bitrix\Main\Config\Configuration;
+use Bitrix\Main\Loader;
+use Bitrix\Main\Config\Option;
+use Bitrix\Main\Localization\Loc;
+use Linxys\LexofficeInterface\ModuleHelper;
+use Bitrix\Crm\UserField\UserFieldManager;
+use Linxys\LexofficeInterface\LexofficeHttpClient;
+
+global $APPLICATION, $USER;
+
+if (!$USER->IsAdmin()) {
+	return;
+}
+
+$module_id = 'linxys.lexofficeinterface';
+Loader::includeModule($module_id);
+
+if (!\Bitrix\Main\Loader::includeModule('crm')) {
+	return '';
+}
+
+// portal url
+$invoiceChangeWebhookUrl = ($_SERVER['SERVER_PORT'] == 443) ? 'https://' : 'http://';
+$invoiceChangeWebhookUrl .= $_SERVER['SERVER_NAME'];
+$invoiceChangeWebhookUrl .= '/bitrix/admin/lexoffice_webhook_receiver.php';
+
+// get company custom fields
+$arCompanyFieldsSelect = array('0' => '-');
+$arCompanyFields = UserFieldManager::getUserFieldEntity(\CCrmOwnerType::Company)->GetFields();
+foreach($arCompanyFields as $uf_code => $field)
+{
+	$arCompanyFieldsSelect[$uf_code] = $field['EDIT_FORM_LABEL'];
+}
+
+// get contact custom fields
+$arContactFieldsSelect = array('0' => '-');
+$arContactFields = UserFieldManager::getUserFieldEntity(\CCrmOwnerType::Contact)->GetFields();
+foreach($arContactFields as $uf_code => $field)
+{
+	$arContactFieldsSelect[$uf_code] = $field['EDIT_FORM_LABEL'];
+}
+
+// get deal custom fields
+$arDealFieldsSelect = array('0' => '-');
+$paketFieldCode = ModuleHelper::getPaketFieldCode();
+$arDealFields = UserFieldManager::getUserFieldEntity(\CCrmOwnerType::Deal)->GetFields();
+foreach($arDealFields as $uf_code => $field)
+{
+	$arDealFieldsSelect[$uf_code] = $field['EDIT_FORM_LABEL'];
+	if ($uf_code == $paketFieldCode) {
+		$paketFieldID = $field['ID'];
+	}
+}
+
+// get deal stages
+$arDealStageSelect = ['0' => '-'];
+$arCategories = Bitrix\Crm\Category\DealCategory::getSelectListItems();
+foreach($arCategories as $key => $category)
+{
+	$arStages = CCrmDeal::GetAllStageNames($key);
+	foreach($arStages as $i => $stage)
+	{
+		$arDealStageSelect[$i] = $stage . " (" . $category . ")";
+	}
+}
+
+//get enum paket field values
+$arPaketEnumValues = [0 => '-'];
+if ($paketFieldID) {
+	$obEnum = new \CUserFieldEnum();
+	$rsEnum = $obEnum->GetList(array(), array("USER_FIELD_ID" => $paketFieldID));
+	while($arEnum = $rsEnum->GetNext()) {
+		$arPaketEnumValues[$arEnum['ID']] = $arEnum['VALUE'];
+	}
+}
+
+//system groups
+$arSystemGroupsSelect = [];
+$rsSystemGroups = \CGroup::GetList(($by = "c_sort"), ($order = "asc"), []);
+while($arSystemGroup = $rsSystemGroups->GetNext()) {
+	$arSystemGroupsSelect[$arSystemGroup['ID']] = $arSystemGroup['NAME'];
+}
+
+//pipeline
+$arDealPipelineSelect = Bitrix\Crm\Category\DealCategory::getSelectListItems();
+
+
+$tabs = array(
+	array(
+		'DIV' => 'general',
+		'TAB' => Loc::getMessage('LINXYS.LEXOFFICE_TAB_GENERAL_NAME'),
+		'TITLE' => Loc::getMessage('LINXYS.LEXOFFICE_TAB_GENERAL_TITLE')
+	),
+	array(
+		'DIV' => 'bulk_generation',
+		'TAB' => Loc::getMessage('LINXYS.LEXOFFICE_TAB_BULK_GENERATION_NAME'),
+		'TITLE' => Loc::getMessage('LINXYS.LEXOFFICE_TAB_BULK_GENERATION_TITLE')
+	),
+);
+
+$options = array(
+	'general' => array(
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_API_SETTINGS'),
+		array('API_TOKEN', Loc::getMessage('LINXYS.LEXOFFICE_OPTION_API_TOKEN'), NULL, array('text', 50)),
+		array('API_INVOICE_CHANGE_CALLBACK_URL', Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_CHANGE_CALLBACK_URL'), $invoiceChangeWebhookUrl, array('text', 50)),
+		array('LOG_FILEPATH', Loc::getMessage('LINXYS.LEXOFFICE_OPTION_LOG_FILEPATH'), NULL, array('text', 50)),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_CONTACT_SETTINGS'),
+		array(
+			'SALUTATION', 
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_SALUTATION'), 
+			0, 
+			array('selectbox', $arContactFieldsSelect)
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_COMPANY_SETTINGS'),
+		array(
+			"KUNDEN",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_KUNDEN'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		array(
+			"SUPPLEMENT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_SUPPLEMENT'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		array(
+			"STREET",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_STREET'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		array(
+			"ZIP_CODE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ZIP_CODE'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		array(
+			"CITY",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_CITY'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_CONTACT_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_OPEN_LEXOFFICE_CONTACT_ID'),
+			0,
+			array('selectbox', $arCompanyFieldsSelect),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_STAGES_SETTINGS'),
+		array(
+			"TRIGGERED_PAYMENT_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_TRIGGERED_PAYMENT_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"TRIGGERED_ORDER_CONFIRMATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_TRIGGERED_ORDER_CONFIRMATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"NO_NEED_CREATE_INVOICE_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_NO_NEED_CREATE_INVOICE_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"NO_NEED_CREATE_ORDER_CONFIRMATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_NO_NEED_CREATE_ORDER_CONFIRMATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_BEFORE_CREATION_SETTINGS'),
+		array(
+			"LEISTUNGSDATUM",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_LEISTUNGSDATUM'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEISTUNGSENDE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_LEISTUNGSENDE'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_INVOICE_TYPE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_TYPE'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_PAKET",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_PAKET'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_PAKET_VALUE_NO_NEED_CREATE_AB_RE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_PAKET_VALUE_NO_NEED_CREATE_AB_RE'),
+			0,
+			array('selectbox', $arPaketEnumValues),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_INVOICE_SETTINGS'),
+		array(
+			"LEXOFFICE_INVOICE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_OPEN_LEXOFFICE_INVOICE_ID'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_INVOICE_NUMBER",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_NUMBER'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_INVOICE_LINK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_LINK'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		/*array(
+			"LEXOFFICE_INVOICE_ADDITIONAL_LINK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_ADDITIONAL_LINK'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),*/
+		array(
+			"LEXOFFICE_INVOICE_STATUS",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_STATUS'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"DUE_DATE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_DUE_DATE'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_INVOICE_DOCUMENT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_INVOICE_DOCUMENT'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_ORDER_CONFIRMATION_SETTINGS'),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_ID'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_NUMBER",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_NUMBER'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_LINK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_LINK'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		/*array(
+			"LEXOFFICE_ORDER_CONFIRMATION_ADDITIONAL_LINK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_ADDITIONAL_LINK'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),*/
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_DOCUMENT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_DOCUMENT'),
+			0,
+			array('selectbox', $arDealFieldsSelect),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_INVOICE_REMARK_SETTINGS'),
+		array(
+			"BEFORE_SEPA_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BEFORE_SEPA_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"BEFORE_INVOICE_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BEFORE_INVOICE_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"REMARK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_REMARK'),
+			0,
+			array('multiselectbox', $arDealFieldsSelect),
+		),
+		array(
+			"AFTER_SEPA_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_AFTER_SEPA_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"AFTER_INVOICE_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_AFTER_INVOICE_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_ORDER_CONFIRMATION_REMARK_SETTINGS'),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_BEFORE_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_BEFORE_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_REMARK",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_REMARK'),
+			0,
+			array('multiselectbox', $arDealFieldsSelect),
+		),
+		array(
+			"LEXOFFICE_ORDER_CONFIRMATION_AFTER_REMARK_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_AFTER_REMARK_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_INVOICE_PAYMENT_TERM_SETTINGS'),
+		array(
+			"PAYMENT_TERM_DURATION",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_PAYMENT_TERM_DURATION'),
+			NULL,
+			array('text', 10),
+		),
+		array(
+			"PAYMENT_TERM_LABEL_SEPA",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_PAYMENT_TERM_LABEL_SEPA'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"PAYMENT_TERM_LABEL_INVOICE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_PAYMENT_TERM_LABEL_INVOICE'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_ORDER_CONFIRMATION_PAYMENT_TERM_SETTINGS'),
+		array(
+			"AB_PAYMENT_TERM_DURATION",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_AB_PAYMENT_TERM_DURATION'),
+			NULL,
+			array('text', 10),
+		),
+		array(
+			"AB_PAYMENT_TERM_LABEL_SEPA",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_AB_PAYMENT_TERM_LABEL_SEPA'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		array(
+			"AB_PAYMENT_TERM_LABEL_INVOICE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_AB_PAYMENT_TERM_LABEL_INVOICE'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_ORDER_CONFIRMATION_INTRODUCTION_SETTINGS'),
+		array(
+			"ORDER_CONFIRMATION_INTRODUCTION_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_INTRODUCTION_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_ORDER_CONFIRMATION_DELIVERY_TERMS_SETTINGS'),
+		array(
+			"ORDER_CONFIRMATION_DELIVERY_TERMS_TEXT",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ORDER_CONFIRMATION_DELIVERY_TERMS_TEXT'),
+			NULL,
+			array('textarea', 4, 80),
+		),
+	),
+	'bulk_generation' => array(
+		Loc::getMessage('LINXYS.LEXOFFICE_SECTION_BULK_RE_AB_GENERATION'),
+		array(
+			"BULK_GENERATION_SYSTEM_USERS_GROUP",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_SYSTEM_USERS_GROUP'),
+			0,
+			array('selectbox', $arSystemGroupsSelect),
+		),
+		array(
+			"BULK_GENERATION_RUNNING",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_RUNNING'),
+			false,
+			array('checkbox'),
+		),
+		array(
+			"BULK_GENERATION_STOP",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_STOP'),
+			true,
+			array('checkbox'),
+		),
+		array(
+			"START_BULK_AB_GENERATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_START_BULK_AB_GENERATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"START_BULK_RE_GENERATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_START_BULK_RE_GENERATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"BULK_AB_GENERATION_PIPELINE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_AB_GENERATION_PIPELINE'),
+			0,
+			array('selectbox', $arDealPipelineSelect),
+		),
+		array(
+			"BULK_RE_GENERATION_PIPELINE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_RE_GENERATION_PIPELINE'),
+			0,
+			array('selectbox', $arDealPipelineSelect),
+		),
+		array(
+			"BULK_AB_GENERATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_AB_GENERATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"BULK_RE_GENERATION_STAGE_ID",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_RE_GENERATION_STAGE_ID'),
+			0,
+			array('selectbox', $arDealStageSelect),
+		),
+		array(
+			"WORKERS_NUMBER_FOR_BULK_GENERATION",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_WORKERS_NUMBER_FOR_BULK_GENERATION'),
+			'0',
+			array('text', '10'),
+		),
+		array(
+			"COEFFICIENT_FOR_BULK_GENERATION",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_COEFFICIENT_FOR_BULK_GENERATION'),
+			'0',
+			array('text', '10'),
+		),
+		array(
+			"BULK_USER_LOGIN",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_USER_LOGIN'),
+			'0',
+			array('text', '20'),
+		),
+		array(
+			"BULK_USER_PWD",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_USER_PASSWORD'),
+			'0',
+			array('password', '20'),
+		),
+		array(
+			"BULK_GENERATION_LOGGING",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_LOGGING'),
+			false,
+			array('checkbox'),
+		),
+		array(
+			"BULK_GENERATION_TEST_MODE",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_TEST_MODE'),
+			"N",
+			array('checkbox'),
+		),
+		array(
+			"BULK_GENERATION_BJ_DELEAY",
+			Loc::getMessage('LINXYS.LEXOFFICE_OPTION_BULK_GENERATION_BJ_DELEAY'),
+			0,
+			array('text', '20'),
+		),
+	),
+);
+
+$tabControl = new CAdminTabControl('tabControl', $tabs);
+
+if (check_bitrix_sessid() && strlen($_POST['save']) > 0) {
+	foreach ($options as $option) {
+		__AdmSettingsSaveOptions($module_id, $option);
+	}
+	// reset cache
+	ModuleHelper::clearCache();
+	LocalRedirect($APPLICATION->GetCurPage()."?mid=".urlencode($mid)."&lang=".LANGUAGE_ID."&".$tabControl->ActiveTabParam());
+}
+
+if(check_bitrix_sessid() && strlen($_POST['addChangeInvoiceWebhook']) > 0)
+{
+	// add webhook url
+	$client = new LexofficeHttpClient();
+	$addWebhookResult = $client->addInvoiceChangeWebhook();
+	if($addWebhookResult['apiResult']['id'])
+	{
+		Option::set($module_id, 'API_INVOICE_CHANGE_WEBHOOK_ID', $addWebhookResult['apiResult']['id']);
+		LocalRedirect($APPLICATION->GetCurPage()."?mid=".urlencode($mid)."&lang=".LANGUAGE_ID."&".$tabControl->ActiveTabParam());
+	} else {
+		// error !!!
+	}
+}
+
+if(check_bitrix_sessid() && strlen($_POST['deleteChangeInvoiceWebhook']) > 0)
+{
+	// delete webhook url
+	$client = new LexofficeHttpClient();
+	$invoiceChangeWebhookId = Option::get($module_id, 'API_INVOICE_CHANGE_WEBHOOK_ID', false);
+	$deleteWebhookResult = $client->deleteInvoiceChangeWebhook($invoiceChangeWebhookId);
+	if($deleteWebhookResult['statusCode'] == 204)
+	{
+		COption::RemoveOption($module_id, 'API_INVOICE_CHANGE_WEBHOOK_ID');
+		COption::RemoveOption($module_id, 'API_INVOICE_CHANGE_CALLBACK_URL');
+		LocalRedirect($APPLICATION->GetCurPage()."?mid=".urlencode($mid)."&lang=".LANGUAGE_ID."&".$tabControl->ActiveTabParam());
+	} else {
+		// error !!!
+	}
+}
+
+$tabControl->Begin();
+?>
+<form method="POST"
+	action="<? echo $APPLICATION->GetCurPage() ?>?mid=<?= htmlspecialcharsbx($mid) ?>&lang=<?= LANGUAGE_ID ?>">
+	<? $tabControl->BeginNextTab(); ?>
+	<? __AdmSettingsDrawList($module_id, $options['general']); ?>
+	<? $tabControl->BeginNextTab(); ?>
+	<? __AdmSettingsDrawList($module_id, $options['bulk_generation']); ?>
+	<? $tabControl->Buttons(array('btnApply' => false, 'btnCancel' => false, 'btnSaveAndAdd' => false)); ?>
+	<? $invoiceChangeWebhookId = Option::get($module_id, 'API_INVOICE_CHANGE_WEBHOOK_ID', false);
+	$invoiceChangeWebhookUrl = Option::get($module_id, 'API_INVOICE_CHANGE_CALLBACK_URL', false);
+	?>
+	<? if(!$invoiceChangeWebhookId && $invoiceChangeWebhookUrl): ?>
+	<input class="" 
+		type="submit" name="addChangeInvoiceWebhook" 
+		value="<?= Loc::getMessage('LINXYS.LEXOFFICE_OPTION_ADD_INVOICE_CHANGE_WEBHOOK') ?>" 
+	/>
+	<? endif; ?>
+	<? if($invoiceChangeWebhookId): ?>
+	<input class="" 
+		type="submit" name="deleteChangeInvoiceWebhook" 
+		value="<?= Loc::getMessage('LINXYS.LEXOFFICE_OPTION_DELETE_INVOICE_CHANGE_WEBHOOK') ?>" 
+	/>
+	<? endif; ?>
+	<?= bitrix_sessid_post(); ?>
+	<? $tabControl->End(); ?>
+</form>
